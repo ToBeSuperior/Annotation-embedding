@@ -1,0 +1,38 @@
+---
+experiment:
+  name: annotate/mitstates/base
+dataset:
+  data_dir: mit-states
+  dataset: mitstates
+  splitname: compositional-split-natural
+  open_world: true
+model_params:
+  model: annoemb
+  dropout: true
+  norm: true
+  nlayers: 2
+  fc_emb: 768,1024,1200    # 2048=classifier
+  emb_dim: 600
+  emb_init: ft+w2v
+  image_extractor: resnet18
+  train_only: true
+  static_inp: false # 원래 false
+training:
+  batch_size: 128
+  eval_val_every: 10
+  load: 
+  lr: 5.0e-05
+  lrg: 0.001
+  margin: 0
+  max_epochs: 200
+  norm_family: imagenet
+  save_every: 10000
+  test_batch_size: 256
+  test_set: val
+  topk: 1
+  wd: 5.0e-05
+  workers: 8
+  update_features: false
+  freeze_features: false # 원래는 false임
+  use_code_book: true
+  train_triplet_loss: true
