@@ -46,6 +46,7 @@ mv ut-zap50k/ut-zap50k-images ut-zap50k/_images/
 
 # C-GQA
 unzip cgqa.zip -d cgqa/
+mv cgqa/cgqa/* cgqa/
 
 # Download new splits for Purushwalkam et. al
 tar -zxvf splits.tar.gz
