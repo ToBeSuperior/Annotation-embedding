@@ -63,12 +63,6 @@ cd fast
 python download_embeddings.py
 rm cc.en.300.bin.gz
 
-# Word2Vec
-cd ../w2v
-wget -c "https://s3.amazonaws.com/dl4j-distribution/GoogleNews-vectors-negative300.bin.gz"
-gzip -d GoogleNews-vectors-negative300.bin.gz
-rm GoogleNews-vectors-negative300.bin.gz
-
 cd ..
 rm -r data
 
