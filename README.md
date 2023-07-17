@@ -24,4 +24,23 @@ cd DATA_ROOT/w2v
 mv download_location/GoogleNews-vectors-negative300.bin.gz .
 gzip -d GoogleNews-vectors-negative300.bin.gz
 rm GoogleNews-vectors-negative300.bin.gz
+
+```
+
+
+## Train
+
+### train CGQA
+```
+python train.py --config configs/anno/cgqa.yml
+```
+
+### train MIT
+```
+python train.py --config configs/anno/mit.yml
+```
+
+### train UT-Zappos50k
+```
+python train.py --config configs/anno/utzappos.yml
 ```
