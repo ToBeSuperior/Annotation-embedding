@@ -92,6 +92,14 @@ def main():
     model.load_state_dict(checkpoint['net'])
     model.eval()
 
+    if args.use_code_book : 
+        path = 'DATA_ROOT/' + args.data_dir 
+        print('stored code book loading...')
+        db = torch.load(path + '/code_book.pt')
+        model.dset.code_book = db['code_book']
+        model.dset.train_triplet_loss = False
+        model.load_state_dict(torch.load('DATA_ROOT/' + args.data_dir + '/pretrained.pt'))
+
     threshold = None
     if args.open_world and args.hard_masking:
         assert args.model == 'compcos', args.model + ' does not have hard masking.'
@@ -138,7 +146,7 @@ def test(image_extractor, model, testloader, evaluator,  args, threshold=None, p
             if image_extractor:
                 data[0] = image_extractor(data[0])
             if threshold is None:
-                _, predictions = model(data)
+                _,_, predictions, _, _ = model(data, False)
             else:
                 _, predictions = model.val_forward_with_threshold(data,threshold)
 
