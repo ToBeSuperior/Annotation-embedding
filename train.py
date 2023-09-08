@@ -137,8 +137,9 @@ def main():
         path = 'DATA_ROOT/' + args.data_dir 
         if not args.train_triplet_loss:
             print('stored code book loading...')
-            db = torch.load(path + '/code_book.pt')
-            model.dset.code_book = db['code_book']
+            # db = torch.load(path + '/code_book.pt')
+            # model.dset.code_book = db['code_book']
+            model.dset.code_book = model.make_code_book()
             model.dset.train_triplet_loss = False
             model.load_state_dict(torch.load('DATA_ROOT/' + args.data_dir + '/pretrained.pt'))
         else:
@@ -158,7 +159,8 @@ def main():
                 #     with torch.no_grad(): # todo: might not be needed
                 #         test(epoch, image_extractor, model, unseen_testloader, evaluator_val, writer, args, logpath, train_cls_only=True)
             model.eval()
-            model.make_code_book(store_path = path + '/code_book.pt')
+            # model.make_code_book(store_path = path + '/code_book.pt')
+            model.dset.codebook = model.make_code_book()
             torch.save(model.state_dict(), 'DATA_ROOT/' + args.data_dir + '/pretrained.pt')
 
     for epoch in tqdm(range(start_epoch, args.max_epochs + 1), desc = 'Current epoch'):

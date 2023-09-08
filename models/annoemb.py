@@ -156,20 +156,28 @@ class Annoemb(nn.Module):
 
         return None, scores
 
-    def make_code_book(self, store_path):
+    def make_code_book(self, store_path=None):
         with torch.no_grad():
-            self.dset.code_book = torch.zeros(len(self.dset.objs), len(self.dset.attrs), 512)
+        #     self.dset.code_book = torch.zeros(len(self.dset.objs), len(self.dset.attrs), 512)
 
-            for i_key, key in enumerate(self.dset.fea_dict.keys()):
-                tmp_attr, tmp_obj = key.split('_')
-                for i_fea, feature in enumerate(self.dset.fea_dict[key]):
-                    self.dset.fea_dict[key][i_fea] = self.anno_classifier(feature.to(device))
-                avg_fea = torch.mean(self.dset.fea_dict[key], dim=0)
-                self.dset.code_book[self.dset.obj2idx[tmp_obj],self.dset.attr2idx[tmp_attr]] = avg_fea
+        #     for i_key, key in enumerate(self.dset.fea_dict.keys()):
+        #         tmp_attr, tmp_obj = key.split('_')
+        #         for i_fea, feature in enumerate(self.dset.fea_dict[key]):
+        #             self.dset.fea_dict[key][i_fea] = self.anno_classifier(feature.to(device))
+        #         avg_fea = torch.mean(self.dset.fea_dict[key], dim=0)
+        #         self.dset.code_book[self.dset.obj2idx[tmp_obj],self.dset.attr2idx[tmp_attr]] = avg_fea
         
-        code_book = {'code_book': self.dset.code_book}
-        self.dset.train_triplet_loss = False
-        torch.save(code_book, store_path)
+        # code_book = {'code_book': self.dset.code_book}
+        # self.dset.train_triplet_loss = False
+        # torch.save(code_book, store_path)
+            codebook = torch.zeros(len(self.uniq_objs), len(self.uniq_attrs), 512).to(device)
+            feat_dict = {}
+            for key in self.dset.fea_dict.keys():
+                a, o = key
+                feat_dict[key] = torch.stack([self.anno_classifier(feature.to(device)) for feature in self.dset.fea_dict[key]], dim=0)
+                codebook[self.dset.obj2idx[o], self.attr2idx[a]] = torch.mean(feat_dict[key], dim=0)
+                
+        return codebook
 
     def train_forward(self, x):
         img, attrs, objs = x[0], x[1], x[2]

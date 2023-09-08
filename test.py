@@ -95,8 +95,9 @@ def main():
     if args.use_code_book : 
         path = 'DATA_ROOT/' + args.data_dir 
         print('stored code book loading...')
-        db = torch.load(path + '/code_book.pt')
-        model.dset.code_book = db['code_book']
+        # db = torch.load(path + '/code_book.pt')
+        # model.dset.code_book = db['code_book']
+        model.dset.code_book = model.make_code_book()
         model.dset.train_triplet_loss = False
         model.load_state_dict(torch.load('DATA_ROOT/' + args.data_dir + '/pretrained.pt'))
 
