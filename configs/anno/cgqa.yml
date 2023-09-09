@@ -32,7 +32,7 @@ training:
   topk: 1
   wd: 5.0e-05
   workers: 8
-  update_features: true
+  update_features: false
   freeze_features: false
   use_code_book: true
   train_triplet_loss: true
