@@ -235,6 +235,32 @@ class Annoemb(nn.Module):
 
         attr_pred = torch.matmul(attr_fea, torch.transpose(attr_embs, 0, 1))
         obj_pred = torch.matmul(obj_fea, torch.transpose(obj_embs, 0, 1))
+        
+        obj_weights = self.softmax(obj_pred).detach()
+        attr_weights = self.softmax(attr_pred).detach()
+        
+        if self.args.use_code_book:
+            
+            temp_obj_code_book = torch.permute(self.dset.val_code_book, (2, 1, 0)).to(device)
+            object_adapted_code_book = torch.matmul(temp_obj_code_book, obj_weights.permute(1, 0))
+
+            temp_attr_code_book = torch.permute(self.dset.val_code_book, (2, 0, 1)).to(device)
+            attr_adapted_code_book = torch.matmul(temp_attr_code_book, attr_weights.permute(1, 0))
+
+            attr_embs = object_adapted_code_book + attr_embs.permute(1, 0).unsqueeze(2)
+            attr_embs = torch.permute(attr_embs, (2, 1, 0))   # object 정보가 첨가된 attribute embs (이미지 정보 -> word 정보 주입)
+
+            obj_embs = attr_adapted_code_book + obj_embs.permute(1, 0).unsqueeze(2)
+            obj_embs = torch.permute(obj_embs, (2, 1, 0))   # attribute 정보가 첨가된 object embs   (이미지 정보 -> word 정보 주입)
+            
+        # if self.args.use_code_book:
+        attr_pred = torch.zeros(attr_fea.size(0), attr_embs.size(1)).to(device)
+        for i, (feature, code_book_feature) in enumerate(zip(attr_fea, attr_embs)):
+            attr_pred[i] = torch.matmul(feature.unsqueeze(0), torch.transpose(code_book_feature,0,1))
+
+        obj_pred = torch.zeros(obj_fea.size(0), obj_embs.size(1)).to(device)
+        for i, (feature, code_book_feature) in enumerate(zip(obj_fea, obj_embs)):
+            obj_pred[i] = torch.matmul(feature.unsqueeze(0), torch.transpose(code_book_feature,0,1))
 
         scores = {}
 

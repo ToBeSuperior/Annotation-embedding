@@ -80,6 +80,15 @@ def main():
     args.extractor = image_extractor
 
 
+    if args.use_code_book : 
+        path = 'DATA_ROOT/' + args.data_dir 
+        print('stored code book loading...')
+        # db = torch.load(path + '/code_book.pt')
+        # model.dset.code_book = db['code_book']
+        model.dset.train_triplet_loss = False
+        model.load_state_dict(torch.load('DATA_ROOT/' + args.data_dir + '/pretrained.pt'))
+        model.dset.val_code_book = model.make_code_book(testset)
+        
     args.load = ospj(logpath,'ckpt_best_auc.t7')
 
     checkpoint = torch.load(args.load)
@@ -92,14 +101,6 @@ def main():
     model.load_state_dict(checkpoint['net'])
     model.eval()
 
-    if args.use_code_book : 
-        path = 'DATA_ROOT/' + args.data_dir 
-        print('stored code book loading...')
-        # db = torch.load(path + '/code_book.pt')
-        # model.dset.code_book = db['code_book']
-        model.dset.code_book = model.make_code_book(testset)
-        model.dset.train_triplet_loss = False
-        model.load_state_dict(torch.load('DATA_ROOT/' + args.data_dir + '/pretrained.pt'))
 
     threshold = None
     if args.open_world and args.hard_masking:
