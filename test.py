@@ -82,6 +82,14 @@ def main():
 
     args.load = ospj(logpath,'ckpt_best_auc.t7')
 
+    if args.use_code_book : 
+        path = 'DATA_ROOT/' + args.data_dir 
+        print('stored code book loading...')
+        db = torch.load(path + '/code_book.pt')
+        model.dset.code_book = db['code_book']
+        model.dset.train_triplet_loss = False
+        model.load_state_dict(torch.load('DATA_ROOT/' + args.data_dir + '/pretrained.pt'))
+        
     checkpoint = torch.load(args.load)
     if image_extractor:
         try:
@@ -91,14 +99,6 @@ def main():
             print('No Image extractor in checkpoint')
     model.load_state_dict(checkpoint['net'])
     model.eval()
-
-    if args.use_code_book : 
-        path = 'DATA_ROOT/' + args.data_dir 
-        print('stored code book loading...')
-        db = torch.load(path + '/code_book.pt')
-        model.dset.code_book = db['code_book']
-        model.dset.train_triplet_loss = False
-        model.load_state_dict(torch.load('DATA_ROOT/' + args.data_dir + '/pretrained.pt'))
 
     threshold = None
     if args.open_world and args.hard_masking:
