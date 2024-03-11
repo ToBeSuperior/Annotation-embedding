@@ -1,34 +1,40 @@
 experiment:
-  name: graphembed/cgqa
+  name: co-cge-ow/cgqa
 dataset:
   data_dir: cgqa
   dataset: cgqa
   splitname: compositional-split-natural
+  open_world: true
 model_params:
   model: graphfull
   dropout: true
   norm: true
-  nlayers:
-  fc_emb: 768,1024,1200
-  gr_emb: d4096,d
+  nlayers: 2
+  fc_emb: 1024,1024,1024,1024,1024,1024,1024,1024,1024,1024,1024,1024
+  gr_emb: d300
   emb_dim: 512
   emb_init: word2vec
   image_extractor: resnet18
-  train_only: true
+  train_only: false
+  cosine_classifier: true
+  feasibility_adjacency: true
 training:
-  batch_size: 256
+  batch_size: 128
   eval_val_every: 2
   load:
   lr: 5.0e-05
   wd: 5.0e-05
   lrg: 5.0e-06
-  margin: 2
-  max_epochs: 2000
+  margin: 0.1
+  cosine_scale: 50
+  max_epochs: 200
   norm_family: imagenet
   save_every: 10000
-  test_batch_size: 32
+  test_batch_size: 256
   test_set: val
   topk: 1
   workers: 8
   update_features: true
   freeze_featues: false
+  use_code_book: true
+  train_triplet_loss: false

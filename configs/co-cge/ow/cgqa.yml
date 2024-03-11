@@ -1,30 +1,31 @@
----
 experiment:
-  name: graphembed/utzappos/base
+  name: co-cge-ow/cgqa
 dataset:
-  data_dir: ut-zap50k
-  dataset: utzappos
+  data_dir: cgqa
+  dataset: cgqa
   splitname: compositional-split-natural
+  open_world: true
 model_params:
   model: graphfull
   dropout: true
   norm: true
   nlayers:
-  fc_emb: 768,1024,1200
-  gr_emb: d4096,d
+  gr_emb: d300
   emb_dim: 512
-  emb_init: null
-  graph_init: utils/utzappos-graph.t7
+  emb_init: word2vec
   image_extractor: resnet18
-  train_only: true
+  train_only: false
+  cosine_classifier: true
+  feasibility_adjacency: true
 training:
-  batch_size: 128
+  batch_size: 256
   eval_val_every: 2
-  load: 
+  load:
   lr: 5.0e-05
   wd: 5.0e-05
-  lrg: 5.0e-6
-  margin: 0.5
+  lrg: 5.0e-06
+  margin: 0.1
+  cosine_scale: 50
   max_epochs: 2000
   norm_family: imagenet
   save_every: 10000
@@ -33,4 +34,4 @@ training:
   topk: 1
   workers: 8
   update_features: true
-  freeze_features: false
+  freeze_featues: false

@@ -18,10 +18,10 @@ cp utils/download_embeddings.py $FOLDER/fast
 
 
 # Download everything
-wget --show-progress -O $FOLDER/attr-ops-data.tar.gz https://utexas.app.box.com/public/static/h7ckk2gx5ykw53h8o641no8rdyi7185g.gz
+wget --show-progress -O $FOLDER/attr-ops-data.tar.gz https://www.cs.utexas.edu/~tushar/attribute-ops/attr-ops-data.tar.gz
 wget --show-progress -O $FOLDER/mitstates.zip http://wednesday.csail.mit.edu/joseph_result/state_and_transformation/release_dataset.zip
-wget --show-progress -O $FOLDER/utzap.zip https://vision.cs.utexas.edu/projects/finegrained/utzap50k/ut-zap50k-images.zip
-wget --show-progress -O $FOLDER/splits.tar.gz https://www.senthilpurushwalkam.com/publication/compositional/compositional_split_natural.tar.gz
+wget --show-progress -O $FOLDER/utzap.zip http://vision.cs.utexas.edu/projects/finegrained/utzap50k/ut-zap50k-images.zip
+wget --show-progress -O $FOLDER/splits.tar.gz http://www.cs.cmu.edu/~spurushw/publication/compositional/compositional_split_natural.tar.gz
 wget --show-progress -O $FOLDER/cgqa.zip https://s3.mlcloud.uni-tuebingen.de/czsl/cgqa-updated.zip
 
 echo "Data downloaded. Extracting files..."
@@ -46,7 +46,6 @@ mv ut-zap50k/ut-zap50k-images ut-zap50k/_images/
 
 # C-GQA
 unzip cgqa.zip -d cgqa/
-mv cgqa/cgqa/* cgqa/
 
 # Download new splits for Purushwalkam et. al
 tar -zxvf splits.tar.gz
@@ -63,6 +62,12 @@ mv data/glove/* glove/
 cd fast
 python download_embeddings.py
 rm cc.en.300.bin.gz
+
+# Word2Vec
+cd ../w2v
+wget -c "https://s3.amazonaws.com/dl4j-distribution/GoogleNews-vectors-negative300.bin.gz"
+gzip -d GoogleNews-vectors-negative300.bin.gz
+rm GoogleNews-vectors-negative300.bin.gz
 
 cd ..
 rm -r data

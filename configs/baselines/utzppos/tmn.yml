@@ -32,4 +32,3 @@ training:
   workers: 8
   update_features: false
   freeze_features: false
-(czsl) mmancini68@EML-Jupi

@@ -1,38 +1,36 @@
 ---
 experiment:
-  name: annotate/utzappos/base
+  name: co-cge-cw/utzappos
 dataset:
   data_dir: ut-zap50k
   dataset: utzappos
   splitname: compositional-split-natural
-  open_world: true
 model_params:
-  model: annoemb
+  model: graphfull
   dropout: true
   norm: true
-  nlayers: 2
-  fc_emb: 768,1024,1200
-  emb_dim: 300
+  nlayers:
+  gr_emb: d300,d
   emb_init: word2vec
+  emb_dim: 512
   image_extractor: resnet18
   train_only: true
-  static_inp: false # 원래 fasle
+  cosine_classifier: true
 training:
   batch_size: 128
-  eval_val_every: 10
+  eval_val_every: 2
   load: 
   lr: 5.0e-05
-  lrg: 0.001
-  margin: 0
-  max_epochs: 200
+  wd: 5.0e-05
+  lrg: 5.0e-6
+  margin: 1.0
+  cosine_scale: 50
+  max_epochs: 2000
   norm_family: imagenet
   save_every: 10000
-  test_batch_size: 256
+  test_batch_size: 32
   test_set: val
   topk: 1
-  wd: 5.0e-05
   workers: 8
   update_features: true
   freeze_features: false
-  use_code_book: true
-  train_triplet_loss: true

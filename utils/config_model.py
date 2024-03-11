@@ -8,8 +8,6 @@ from models.modular_methods import GatedGeneralNN
 from models.graph_method import GraphFull
 from models.symnet import Symnet
 from models.compcos import CompCos
-from models.classifier import Classifier
-from models.annoemb import Annoemb
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -32,14 +30,12 @@ def configure_model(args, dataset):
         model = Symnet(dataset, args)
     elif args.model == 'graphfull':
         model = GraphFull(dataset, args)
+        if args.feasibility_adjacency:
+            is_open = True
     elif args.model == 'compcos':
         model = CompCos(dataset, args)
         if dataset.open_world and not args.train_only:
             is_open = True
-    elif args.model == 'classifier':
-        model = Classifier(dataset, args)
-    elif args.model == 'annoemb' :
-        model = Annoemb(dataset, args)
     else:
         raise NotImplementedError
 
@@ -78,7 +74,7 @@ def configure_model(args, dataset):
     else:
         model_params = [param for name, param in model.named_parameters() if param.requires_grad]
         optim_params = [{'params':model_params}]
-    if args.update_features :
+    if args.update_features:
         ie_parameters = [param for name, param in image_extractor.named_parameters()]
         optim_params.append({'params': ie_parameters,
                             'lr': args.lrg})

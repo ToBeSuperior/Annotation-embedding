@@ -22,6 +22,10 @@ parser.add_argument('--open_world', action='store_true', default=False, help='pe
 parser.add_argument('--test_batch_size', type=int, default=32, help="Batch size at test/eval time")
 parser.add_argument('--cpu_eval', action='store_true', help='Perform test on cpu')
 
+# Evaluation
+parser.add_argument('--fast_eval', action='store_true', help='Fast version of evaluator (for the open world)')
+parser.add_argument('--closed_eval', action='store_true', help='Closed world evaluation (useful only if a method has been trained for OW-CZSL)')
+
 # Model parameters
 parser.add_argument('--model', default='graphfull', help='visprodNN|redwine|labelembed+|attributeop|tmn|compcos')
 parser.add_argument('--emb_dim', type=int, default=300, help='dimension of share embedding space')
@@ -40,11 +44,6 @@ parser.add_argument('--dropout', action='store_true', default=False, help='Use d
 parser.add_argument('--norm', action='store_true', default=False, help='Use normalization in image embedder')
 parser.add_argument('--train_only', action='store_true', default=False, help='Optimize only for train pairs')
 
-#CGE
-parser.add_argument('--graph', action='store_true', default=False, help='graph l2 distance triplet') # Do we need this
-parser.add_argument('--graph_init', default=None, help='filename, file from which initializing the nodes and adjacency matrix of the graph')
-parser.add_argument('--gcn_type', default='gcn', help='GCN Version')
-
 # Forward
 parser.add_argument('--eval_type', default='dist', help='dist|prod|direct, function for computing the predictions')
 
@@ -55,7 +54,6 @@ parser.add_argument('--lambda_aux', type=float, default=0.0, help='weight of aux
 parser.add_argument('--lambda_inv', type=float, default=0.0, help='weight of inverse consistency loss')
 parser.add_argument('--lambda_comm', type=float, default=0.0, help='weight of commutative loss')
 parser.add_argument('--lambda_ant', type=float, default=0.0, help='weight of antonyms loss')
-
 
 # SymNet
 parser.add_argument("--lambda_trip", type=float, default=0, help='weight of triplet loss')
@@ -72,6 +70,13 @@ parser.add_argument('--hard_masking', action='store_true', default=False, help='
 parser.add_argument('--threshold', default=None,help="Apply a specific threshold at test time for the hard masking")
 parser.add_argument('--threshold_trials', type=int, default=50,help="how many threshold values to try")
 
+# Graph methods
+parser.add_argument('--graph_init', default=None, help='filename, file from which initializing the nodes and adjacency matrix of the graph')
+parser.add_argument('--gcn_type', default='gcn', help='GCN Version')
+parser.add_argument("--gr_emb", default='d4096,d',help="graph layers config")
+parser.add_argument("--cosine_classifier", action='store_true', default=False, help="use a cosine classifier (Co-CGE)")
+parser.add_argument("--feasibility_adjacency", action='store_true', default=False, help="weight the graph connections by the feasibility scores (Co-CGE)")
+
 # Hyperparameters
 parser.add_argument('--topk', type=int, default=1,help="Compute topk accuracy")
 parser.add_argument('--margin', type=float, default=2,help="Margin for triplet loss or feasibility scores in CompCos")
@@ -84,4 +89,3 @@ parser.add_argument('--save_every', type=int, default=10000,help="Frequency of s
 parser.add_argument('--eval_val_every', type=int, default=1,help="Frequency of eval in epochs")
 parser.add_argument('--max_epochs', type=int, default=800,help="Max number of epochs")
 parser.add_argument("--fc_emb", default='768,1024,1200',help="Image embedder layer config")
-parser.add_argument("--gr_emb", default='d4096,d',help="graph layers config")

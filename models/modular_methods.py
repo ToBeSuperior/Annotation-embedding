@@ -314,7 +314,7 @@ class CompositionalModel(nn.Module):
             feats[(attr, obj)] = pair_feats[:, i]
 
         # return None, (scores, feats)
-        return None, scores
+        return pair_scores, scores
 
     def forward(self, x, with_grad=False):
         if self.training:

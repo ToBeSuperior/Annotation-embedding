@@ -81,21 +81,6 @@ class ManifoldModel(nn.Module):
         return  loss, None
 
 
-    def val_forward_distance(self, x):
-        img = x[0]
-        batch_size = img.shape[0]
-
-        img_feats = self.image_embedder(img)
-        scores = {}
-        pair_embeds = self.compose(self.val_attrs, self.val_objs)
-        
-        for itr, pair in enumerate(self.dset.pairs):
-            pair_embed = pair_embeds[itr, None].expand(batch_size, pair_embeds.size(1))
-            score = self.compare_metric(img_feats, pair_embed)
-            scores[pair] = score
-
-        return None, scores
-
     def val_forward_distance_fast(self, x):
         img = x[0]
         batch_size = img.shape[0]
@@ -113,7 +98,7 @@ class ManifoldModel(nn.Module):
         for itr, pair in enumerate(self.dset.pairs):
             scores[pair] = score[:,self.dset.all_pair2idx[pair]]
 
-        return None, scores
+        return score, scores
     
     def val_forward_direct(self, x):
         img = x[0]
@@ -127,7 +112,7 @@ class ManifoldModel(nn.Module):
         for itr, pair in enumerate(self.dset.pairs):
             scores[pair] = score[:,self.dset.all_pair2idx[pair]]
 
-        return None, scores
+        return score, scores
 
     def forward(self, x):
         if self.training:

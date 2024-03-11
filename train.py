@@ -28,18 +28,18 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 import random
 import numpy as np
-import torch
-import torch.backends.cudnn as cudnn
  
 def main():
     # Get arguments and start logging
     args = parser.parse_args()
     load_args(args.config, args)
+
+    assert not (args.model=='symnet' and args.fast_eval), "fast_eval is currently not available for SymNet"
+
     logpath = os.path.join(args.cv_dir, args.name)
     os.makedirs(logpath, exist_ok=True)
     save_args(args, logpath, args.config)
     writer = SummaryWriter(log_dir = logpath, flush_secs = 30)
-    print(args)
 
     # Get dataset
     trainset = dset.CompositionDataset(
@@ -59,9 +59,25 @@ def main():
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.workers)
+    
+    valset = dset.CompositionDataset(
+        root=os.path.join(DATA_FOLDER,args.data_dir),
+        phase='val',
+        split=args.splitname,
+        model=args.image_extractor,
+        subset=args.subset,
+        update_features=args.update_features,
+        open_world=args.open_world
+    )
+    valoader = torch.utils.data.DataLoader(
+        valset,
+        batch_size=args.test_batch_size,
+        shuffle=False,
+        num_workers=args.workers)
+    
     testset = dset.CompositionDataset(
         root=os.path.join(DATA_FOLDER,args.data_dir),
-        phase=args.test_set,
+        phase='test',
         split=args.splitname,
         model =args.image_extractor,
         subset=args.subset,
@@ -110,7 +126,8 @@ def main():
 
     train = train_normal
 
-    evaluator_val =  Evaluator(testset, model)
+    evaluator_val =  Evaluator(valset, model)
+    evaluator_test =  Evaluator(testset, model)
 
     print(model)
 
@@ -142,8 +159,8 @@ def main():
             model.dset.train_triplet_loss = False
             model.load_state_dict(torch.load('DATA_ROOT/' + args.data_dir + '/pretrained.pt'))
         else:
-            print('code book starting...')
-            for epoch in tqdm(range(start_epoch, 30 + 1), desc = 'semantic difference epoch'):
+            print('code book starting...')#
+            for epoch in tqdm(range(start_epoch, 30+1), desc = 'semantic difference epoch'):
                 train(epoch, image_extractor, model, trainloader, optimizer, writer, train_cls_only=True)
                 # break
                 # if epoch % args.eval_val_every == 0:
@@ -163,11 +180,23 @@ def main():
 
     for epoch in tqdm(range(start_epoch, args.max_epochs + 1), desc = 'Current epoch'):
         train(epoch, image_extractor, model, trainloader, optimizer, writer)
+        if model.is_open and ((epoch+1)%args.update_feasibility_every)==0:
+            if args.model=='compcos':
+                print('Updating feasibility scores')
+                model.update_feasibility(epoch+1.)
+            if args.feasibility_adjacency:
+                print('Updating adjacency matrix')
+                model.update_adj(epoch + 1.)
+
 
         if epoch % args.eval_val_every == 0:
-            with torch.no_grad(): # todo: might not be needed
-                test(epoch, image_extractor, model, testloader, evaluator_val, writer, args, logpath)
-
+            with torch.no_grad():
+                if args.fast_eval:
+                    do_test = test_fast(epoch, image_extractor, model, valoader, evaluator_val, writer, args, logpath, 'dev')
+                    if do_test:
+                        test_fast(epoch, image_extractor, model, testloader, evaluator_test, writer, args, logpath, 'test')
+                else:
+                    test(epoch, image_extractor, model, testloader, evaluator_val, writer, args, logpath)
     print('Best AUC achieved is ', best_auc)
     print('Best HM achieved is ', best_hm)
 
@@ -188,7 +217,6 @@ def train_normal(epoch, image_extractor, model, trainloader, optimizer, writer, 
     train_con_neg = 0.0
     
     for idx, data in tqdm(enumerate(trainloader), total=len(trainloader), desc = 'Training'):
-        optimizer.zero_grad()
         data  = [d.to(device) for d in data]
 
         if image_extractor and not train_cls_only:
@@ -197,6 +225,7 @@ def train_normal(epoch, image_extractor, model, trainloader, optimizer, writer, 
         CE_loss, margin_loss, _, loss_con_pos, loss_con_neg = model(data, train_cls_only)
         loss = CE_loss + margin_loss
 
+        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         
@@ -217,7 +246,7 @@ def train_normal(epoch, image_extractor, model, trainloader, optimizer, writer, 
         epoch, round(train_loss, 2), round(train_CE_loss, 2), round(train_margin_loss, 2), round(train_con_pos, 2), round(train_con_neg, 2)))
 
 
-def test(epoch, image_extractor, model, testloader, evaluator, writer, args, logpath, train_cls_only=False):
+def test(epoch, image_extractor, model, testloader, evaluator, writer, args, logpath, split='dev', train_cls_only=False):
     '''
     Runs testing for an epoch
     '''
@@ -275,27 +304,9 @@ def test(epoch, image_extractor, model, testloader, evaluator, writer, args, log
             all_pred_dict[k] = torch.cat(
                 [all_pred[i][k] for i in range(len(all_pred))])
 
+    # Calculate best unseen accuracy
     results = evaluator.score_model(all_pred_dict, all_obj_gt, bias=args.bias, topk=args.topk)
     stats = evaluator.evaluate_predictions(results, all_attr_gt, all_obj_gt, all_pair_gt, all_pred_dict, topk=args.topk)
-
-    ############## test 0709 : pair 따로 accuracy만 보기 ##################
-
-    # print(f'Test Epoch: {epoch}')
-
-    # scores = {k: v.to('cpu') for k, v in all_pred_dict.items()}
-    # scores = torch.stack(
-    #     [scores[obj] for obj in evaluator.dset.pairs], 1
-    # )
-    # scores = torch.argmax(scores,1)
-    # predict_acc = torch.sum(scores==all_pair_gt) / len(scores)
-
-    # print("classifier pair prediction accuracy  : {}".format(predict_acc))
-
-
-    # return
-
-    ############## test 0709 : pair 따로 accuracy만 보기 ##################
-
 
     stats['a_epoch'] = epoch
 
@@ -326,6 +337,120 @@ def test(epoch, image_extractor, model, testloader, evaluator, writer, args, log
         if epoch == 0:
             w.writeheader()
         w.writerow(stats)
+
+
+def test_fast(epoch, image_extractor, model, testloader, evaluator, writer, args, logpath, split='dev', train_cls_only=False):
+    '''
+    Runs testing for an epoch
+    '''
+    global best_auc, best_hm, best_unseen
+
+    def save_checkpoint(filename, key='AUC'):
+        state = {
+            'net': model.state_dict(),
+            'epoch': epoch,
+            key: stats[key]
+        }
+        if image_extractor:
+            state['image_extractor'] = image_extractor.state_dict()
+        torch.save(state, os.path.join(logpath, 'ckpt_{}.t7'.format(filename)))
+
+    if image_extractor:
+        image_extractor.eval()
+
+    model.eval()
+
+
+    bias = args.bias
+    biaslist = None
+    for idx, data in tqdm(enumerate(testloader), total=len(testloader), desc='Computing bias'):
+        data = [d.to(device) for d in data]
+
+        if image_extractor and args.model!='MAT':
+            data[0] = image_extractor(data[0])
+
+        scores, _, _, _, _ = model(data, train_cls_only)
+        scores = scores.to('cpu')
+
+        attr_truth, obj_truth, pair_truth = data[1].to('cpu'), data[2].to('cpu'), data[3].to('cpu')
+
+        biaslist = evaluator.compute_biases(scores.to('cpu'), attr_truth, obj_truth, pair_truth, previous_list = biaslist)
+
+    biaslist = list(evaluator.get_biases(biaslist).numpy())
+    biaslist.append(bias)
+
+
+
+    results = {b: {'unseen':0.,'seen':0.,'total_unseen':0.,'total_seen':0., 'attr_match':0.,'obj_match':0.} for b in biaslist}
+
+    for idx, data in tqdm(enumerate(testloader), total=len(testloader), desc='Testing'):
+        data = [d.to(device) for d in data]
+
+        if image_extractor:
+            data[0] = image_extractor(data[0])
+
+        scores, _, _, _, _ = model(data, train_cls_only)
+        scores = scores.to('cpu')
+
+        attr_truth, obj_truth, pair_truth = data[1].to('cpu'), data[2].to('cpu'), data[3].to('cpu')
+
+        seen_mask = None
+
+        for b in biaslist:
+            attr_match, obj_match, seen_match, unseen_match, seen_mask = \
+                evaluator.get_accuracies_fast(scores, attr_truth, obj_truth, pair_truth, bias=b, seen_mask=seen_mask)
+
+            results[b]['unseen'] += unseen_match.item()
+            results[b]['seen'] += seen_match.item()
+            results[b]['total_unseen'] += scores.shape[0]-seen_mask.sum().item()
+            results[b]['total_seen'] += seen_mask.sum().item()
+            results[b]['attr_match'] += attr_match.item()
+            results[b]['obj_match'] += obj_match.item()
+
+    for b in biaslist:
+        results[b]['unseen']/= results[b]['total_unseen']
+        results[b]['seen']/= results[b]['total_seen']
+        results[b]['attr_match']/= (results[b]['total_seen']+results[b]['total_unseen'])
+        results[b]['obj_match']/= (results[b]['total_seen']+results[b]['total_unseen'])
+
+
+    results['a_epoch'] = epoch
+
+    stats = evaluator.collect_results(biaslist,results)
+
+    result = ''
+    # write to Tensorboard
+    for key in stats:
+        writer.add_scalar(key, stats[key], epoch)
+        result = result + key + '  ' + str(round(stats[key], 4)) + '| '
+
+    result = result + args.name
+    print(f'{split} Epoch: {epoch}')
+    print(result)
+
+    if epoch > 0 and epoch % args.save_every == 0:
+        save_checkpoint(epoch)
+
+    if stats['best_hm'] > best_hm:
+        best_hm = stats['best_hm']
+        print('New best HM ', best_hm)
+        save_checkpoint('best_hm')
+
+    if stats['AUC'] > best_auc and split=='dev':
+        best_auc = stats['AUC']
+        print('New best AUC ', best_auc)
+        save_checkpoint('best_auc')
+        return True
+    else:
+        return False
+
+    # Logs
+    with open(ospj(logpath, 'logs.csv'), 'a') as f:
+        w = csv.DictWriter(f, stats.keys())
+        if epoch == 0:
+            w.writeheader()
+        w.writerow(stats)
+
 
 
 if __name__ == '__main__':

@@ -203,7 +203,7 @@ class CompCos(nn.Module):
         for itr, pair in enumerate(self.dset.pairs):
             scores[pair] = score[:, self.dset.all_pair2idx[pair]]
 
-        return None, scores
+        return score, scores
 
 
     def val_forward_with_threshold(self, x, th=0.):
@@ -221,7 +221,7 @@ class CompCos(nn.Module):
         for itr, pair in enumerate(self.dset.pairs):
             scores[pair] = score[:, self.dset.all_pair2idx[pair]]
 
-        return None, scores
+        return score, scores
 
 
     def train_forward_open(self, x):
@@ -260,10 +260,11 @@ class CompCos(nn.Module):
     def forward(self, x):
         if self.training:
             loss, pred = self.train_forward(x)
+            return loss, pred
         else:
             with torch.no_grad():
-                loss, pred = self.val_forward(x)
-        return loss, pred
+                fast_pred, pred = self.val_forward(x)
+            return fast_pred, pred
 
 
 
