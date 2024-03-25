@@ -75,7 +75,7 @@ class GraphFull(nn.Module):
 
         # Image Embedder
         self.num_attrs, self.num_objs, self.num_pairs = len(dset.attrs), len(dset.objs), len(self.pairs)
-
+        self.code_book_unseen_mask = (1. - self.seen_mask).view(self.num_attrs,-1)
 
         if self.args.train_only:
             train_idx = []
@@ -94,11 +94,9 @@ class GraphFull(nn.Module):
             self.image_embedder = MLP(dset.feat_dim, args.emb_dim, num_layers=args.nlayers, dropout=self.args.dropout,
                                       norm=self.args.norm, layers=layers, relu=True)
             self.img2attr = MLP(dset.feat_dim, args.emb_dim, num_layers=args.nlayers, dropout=self.args.dropout,
-                                      norm=self.args.norm, layers=layers, relu=True)
+                                      norm=self.args.norm, layers=layers, relu=False)
             self.img2obj = MLP(dset.feat_dim, args.emb_dim, num_layers=args.nlayers, dropout=self.args.dropout,
-                                      norm=self.args.norm, layers=layers, relu=True)
-            self.anno_classifier = MLP(dset.feat_dim, args.emb_dim, num_layers=args.nlayers, dropout=self.args.dropout,
-                                      norm=self.args.norm, layers=layers, relu=True)
+                                      norm=self.args.norm, layers=layers, relu=False)
 
         all_words = list(self.dset.attrs) + list(self.dset.objs)
         self.displacement = len(all_words)
@@ -249,88 +247,44 @@ class GraphFull(nn.Module):
                     self.feasibility_margins[idx] = 0.
         self.feasibility_margins *= min(1., epoch / self.epoch_max_margin)*self.cosine_margin_factor
 
-    def codebook_train(self, x):
-        img = x[0]
-        pos_obj, img_neg = x[-2], x[-1]
 
-        cls_fea = self.anno_classifier(img)  
+    def softmax_with_temperature(self, z, T=1) : 
+        '''
+        T = 1 -> common softmax
+        T = 2,3,... -> scaled softmax 
+        '''
+        z = z / T 
+        max_z, _ = torch.max(z, dim=1)
+        exp_z = torch.exp(z-max_z.unsqueeze(1)) 
+        sum_exp_z = torch.sum(exp_z, dim=1)
+        y = exp_z / sum_exp_z.unsqueeze(1)
+        return y
+    
+    def ce_with_temperature(self, logits, target, temperature=1):
 
-        loss_con_pos = 0
-        loss_con_neg = 0
-        for i in range(len(img_neg[0])):
-            neg_sample = img_neg[:, i, :]
-            obj_neg_feats = self.anno_classifier(neg_sample)
-
-            index_1 = random.choice(range(pos_obj.shape[1]))
-            pos_sample = pos_obj[:, index_1, :]
-            pos_feats = self.anno_classifier(pos_sample)
-
-            loss_con_pos += F.triplet_margin_loss(cls_fea, pos_feats, cls_fea, margin=0)
-            loss_con_neg += F.triplet_margin_loss(cls_fea, cls_fea, obj_neg_feats, margin=10)
-            if math.isnan(loss_con_neg):
-                print(torch.min(neg_sample))
-
-        loss_con_pos /= pos_obj.shape[1] 
-        loss_con_neg /= pos_obj.shape[1] 
-        loss_con_obj = loss_con_pos + loss_con_neg
-
-        cls_loss = torch.tensor(0)
-
-        return cls_loss, loss_con_obj, None, loss_con_pos, loss_con_neg
-
-    def eval_classifier_only(self, x):
-        img = x[0]
-
-        attr_embs, objs_embs = self.compose(self.uniq_attrs, self.uniq_objs)
-
-        if self.args.target == 'attr':
-            attr_cls_fea = self.anno_classifier(img)   #attr_classifier
-
-            score = torch.matmul(attr_cls_fea, torch.transpose(attr_embs,0,1))
-
-            scores = {}
-            for itr, attr in enumerate(self.dset.attrs):
-                    scores[attr] = score[:,self.dset.attr2idx[attr]]
-
-        elif self.args.target == 'obj':
-            obj_cls_fea = self.anno_classifier(img)   #obj_classifier
-
-            score = torch.matmul(obj_cls_fea, torch.transpose(objs_embs,0,1))
-            
-            scores = {}
-            for itr, obj in enumerate(self.dset.objs):
-                    scores[obj] = score[:,self.dset.obj2idx[obj]]
-
-        return None, scores
-
-    def make_code_book(self, store_path):
-        with torch.no_grad():
-            self.dset.code_book = torch.zeros(len(self.dset.objs), len(self.dset.attrs), 512)
-
-            for i_key, key in enumerate(self.dset.fea_dict.keys()):
-                tmp_attr, tmp_obj = key.split('_')
-                for i_fea, feature in enumerate(self.dset.fea_dict[key]):
-                    self.dset.fea_dict[key][i_fea] = self.anno_classifier(feature.to(device))
-                avg_fea = torch.mean(self.dset.fea_dict[key], dim=0)
-                self.dset.code_book[self.dset.obj2idx[tmp_obj],self.dset.attr2idx[tmp_attr]] = avg_fea
-        
-        code_book = {'code_book': self.dset.code_book}
-        self.dset.train_triplet_loss = False
-        torch.save(code_book, store_path)
-
+        logits = self.softmax_with_temperature(logits, temperature)
+        return torch.mean((-1.0)*torch.sum(torch.log(logits)*target, dim=1))
 
     def train_forward_normal(self, x):
         img, attrs, objs, pairs = x[0], x[1], x[2], x[3]
 
+        attr_target = torch.zeros(img.size(0), self.num_attrs).to(device)
+        obj_target = torch.zeros(img.size(0), self.num_objs).to(device)
+
+        attr_target[range(img.size(0)), attrs] = 1
+        obj_target[range(img.size(0)), objs] = 1
+
         if self.args.nlayers:
             img_feats = self.image_embedder(img)
-            obj_fea = self.img2obj(img_feats)
-            attr_fea = self.img2attr(img_feats)
+            attr_fea = self.img2attr(img)
+            obj_fea = self.img2obj(img)
         else:
             img_feats = (img)
 
         if self.cosloss:
             img_feats = F.normalize(img_feats, dim=1)
+            attr_fea = F.normalize(attr_fea, dim=1)
+            obj_fea = F.normalize(obj_fea, dim=1)
 
         current_embeddings = self.gcn(self.embeddings)
 
@@ -343,40 +297,22 @@ class GraphFull(nn.Module):
         pair_embed = pair_embed.permute(1, 0)
         pair_pred = torch.matmul(img_feats, pair_embed)
 
-        
         attr_embs = current_embeddings[:self.num_attrs]
         obj_embs = current_embeddings[self.num_attrs:self.num_attrs+self.num_objs]
 
-        obj_pred = torch.matmul(obj_fea, torch.transpose(obj_embs, 0, 1))
-        attr_pred = torch.matmul(attr_fea, torch.transpose(attr_embs, 0, 1))
-
-        obj_weights = self.softmax(obj_pred).detach()
-        attr_weights = self.softmax(attr_pred).detach()
-
-        if self.args.use_code_book:
-
-            temp_obj_code_book = torch.permute(self.dset.code_book, (2, 1, 0)).to(device)
-            object_adapted_code_book = torch.matmul(temp_obj_code_book, obj_weights.permute(1, 0))
-
-            temp_attr_code_book = torch.permute(self.dset.code_book, (2, 0, 1)).to(device)
-            attr_adapted_code_book = torch.matmul(temp_attr_code_book, attr_weights.permute(1, 0))
-
-            attr_embs = object_adapted_code_book + attr_embs.permute(1, 0).unsqueeze(2)
-            attr_embs = torch.permute(attr_embs, (2, 1, 0))   # object 정보가 첨가된 attribute embs (이미지 정보 -> word 정보 주입)
-
-            obj_embs = attr_adapted_code_book + obj_embs.permute(1, 0).unsqueeze(2)
-            obj_embs = torch.permute(obj_embs, (2, 1, 0))   # attribute 정보가 첨가된 object embs   (이미지 정보 -> word 정보 주입)
-
         # if self.args.use_code_book:
-        attr_pred = torch.zeros(attr_fea.size(0), attr_embs.size(1)).to(device)
-        for i, (feature, code_book_feature) in enumerate(zip(attr_fea, attr_embs)):
-            attr_pred[i] = torch.matmul(feature.unsqueeze(0), torch.transpose(code_book_feature,0,1))
 
-        obj_pred = torch.zeros(obj_fea.size(0), obj_embs.size(1)).to(device)
-        for i, (feature, code_book_feature) in enumerate(zip(obj_fea, obj_embs)):
-            obj_pred[i] = torch.matmul(feature.unsqueeze(0), torch.transpose(code_book_feature,0,1))
+        #     temp_attr_code_book = self.dset.attr_code_book.to(device)   # [attr_nums, obj_nums, 512]
+        #     attr_sim_code_book = torch.matmul(temp_attr_code_book, attr_fea.permute(1, 0))   # [attr_nums, obj_nums, batch]
+        #     attr_pred = torch.sum(torch.permute(attr_sim_code_book, (2, 0, 1)), dim=-1) / torch.sum(self.code_book_unseen_mask, dim=1)
+        #     # attr_pred = attr_pred + torch.matmul(attr_fea, attr_embs)
 
-        loss = F.cross_entropy(attr_pred, attrs) + F.cross_entropy(obj_pred, objs)
+        #     temp_obj_code_book = self.dset.obj_code_book.to(device)   # [attr_nums, obj_nums, 512]
+        #     obj_sim_code_book = torch.matmul(temp_obj_code_book, obj_fea.permute(1, 0))    # [attr_nums, obj_nums, batch]
+        #     obj_pred = torch.sum(torch.permute(obj_sim_code_book, (2, 1, 0)), dim=-1) / torch.sum(self.code_book_unseen_mask, dim=0)
+            # obj_pred = obj_pred + torch.matmul(obj_fea, obj_embs)
+        
+        # loss = self.ce_with_temperature(attr_pred, attr_target,5) + self.ce_with_temperature(obj_pred, obj_target,5)
 
         if self.cosloss:
             if self.dset.open_world:
@@ -384,22 +320,66 @@ class GraphFull(nn.Module):
             else:
                 pair_pred = pair_pred * self.scale
 
-        loss = loss + F.cross_entropy(pair_pred, pairs)
+        loss = F.cross_entropy(pair_pred, pairs) #+ loss
 
-        return loss, None
+        # pos_score = pair_pred[torch.arange(len(pairs)), pairs[torch.arange(len(pairs))]]
+        
+        # a = pair_pred.view(-1, self.num_attrs, self.num_objs)
+        # f = a[torch.arange(len(attrs)), attrs[torch.arange(len(attrs))]]
+        # g = a.permute(0,2,1)[torch.arange(len(objs)), objs[torch.arange(len(objs))]]
+
+        # neg_score = torch.cat((f,g), dim=1)
+
+        # numbers = list(range(neg_score.size(1)))
+        # sampled_numbers = random.sample(numbers, 5)
+        # neg_score = neg_score[:, sampled_numbers]
+
+        # contrastive_loss = F.triplet_margin_loss(img_feats, pos_embed, neg_embed[:,i,:], margin=1)
+
+
+        attr_pred = torch.matmul(attr_fea, attr_embs.T) * 0.5
+        obj_pred = torch.matmul(obj_fea, obj_embs.T) * 0.5
+
+        # attr_loss = F.cross_entropy(attr_pred, attrs)
+        # obj_loss = F.cross_entropy(obj_pred, objs)
+        # loss = loss + attr_loss + obj_loss
+
+        attr_pos_score = attr_pred[torch.arange(len(attrs)), attrs[torch.arange(len(attrs))]]
+        obj_pos_score = obj_pred[torch.arange(len(objs)), objs[torch.arange(len(objs))]]
+
+        attrs_list = [[x] for x in attrs.tolist()]
+        objs_list = [[x] for x in objs.tolist()]
+        attr_negs = torch.stack([attr_pred[idx][torch.tensor(list(set(range(attr_pred.size(1))) - set(exclude)))] for idx, exclude in enumerate(attrs_list)])
+        obj_negs = torch.stack([obj_pred[idx][torch.tensor(list(set(range(obj_pred.size(1))) - set(exclude)))] for idx, exclude in enumerate(objs_list)])
+
+        attr_negs_threshold = torch.mean(attr_negs, dim=1).detach()
+        obj_negs_threshold = torch.mean(obj_negs, dim=1).detach()
+
+        attr_negs_score = torch.where(attr_negs > attr_negs_threshold.view(-1, 1), attr_negs_threshold.view(-1, 1), attr_negs)
+        obj_negs_score = torch.where(obj_negs > obj_negs_threshold.view(-1, 1), obj_negs_threshold.view(-1, 1), obj_negs)
+
+        attr_ctrt_loss = -torch.max(torch.mean(attr_pos_score) - torch.mean(attr_negs_score) + 0., torch.tensor(0))
+        obj_ctrt_loss = -torch.max(torch.mean(obj_pos_score) - torch.mean(obj_negs_score) + 0., torch.tensor(0))
+
+        contrastive_loss = (attr_ctrt_loss + obj_ctrt_loss) * 0.1
+        # contrastive_loss = torch.tensor(0)
+
+        return loss, contrastive_loss, None
 
     def val_forward_dotpr(self, x):
         img = x[0]
 
         if self.args.nlayers:
             img_feats = self.image_embedder(img)
-            obj_fea = self.img2obj(img_feats)
-            attr_fea = self.img2attr(img_feats)
+            obj_fea = self.img2obj(img)
+            attr_fea = self.img2attr(img)
         else:
-            img_feats = (img)
+            img_feats = (img)  
 
         if self.cosloss:
             img_feats = F.normalize(img_feats, dim=1)
+            attr_fea = F.normalize(attr_fea, dim=1)
+            obj_fea = F.normalize(obj_fea, dim=1)
 
         current_embeddings = self.gcn(self.embeddings)
 
@@ -409,36 +389,21 @@ class GraphFull(nn.Module):
         attr_embs = current_embeddings[:self.num_attrs]
         obj_embs = current_embeddings[self.num_attrs:self.num_attrs+self.num_objs]
 
-        attr_pred = torch.matmul(attr_fea, torch.transpose(attr_embs, 0, 1))
-        obj_pred = torch.matmul(obj_fea, torch.transpose(obj_embs, 0, 1))
-        
-        obj_weights = self.softmax(obj_pred).detach()
-        attr_weights = self.softmax(attr_pred).detach()
-
-        if self.args.use_code_book:
-
-            temp_obj_code_book = torch.permute(self.dset.code_book, (2, 1, 0)).to(device)
-            object_adapted_code_book = torch.matmul(temp_obj_code_book, obj_weights.permute(1, 0))
-
-            temp_attr_code_book = torch.permute(self.dset.code_book, (2, 0, 1)).to(device)
-            attr_adapted_code_book = torch.matmul(temp_attr_code_book, attr_weights.permute(1, 0))
-
-            attr_embs = object_adapted_code_book + attr_embs.permute(1, 0).unsqueeze(2)
-            attr_embs = torch.permute(attr_embs, (2, 1, 0))   # object 정보가 첨가된 attribute embs (이미지 정보 -> word 정보 주입)
-
-            obj_embs = attr_adapted_code_book + obj_embs.permute(1, 0).unsqueeze(2)
-            obj_embs = torch.permute(obj_embs, (2, 1, 0))   # attribute 정보가 첨가된 object embs   (이미지 정보 -> word 정보 주입)
-
         # if self.args.use_code_book:
-        attr_pred = torch.zeros(attr_fea.size(0), attr_embs.size(1)).to(device)
-        for i, (feature, code_book_feature) in enumerate(zip(attr_fea, attr_embs)):
-            attr_pred[i] = torch.matmul(feature.unsqueeze(0), torch.transpose(code_book_feature,0,1))
 
-        obj_pred = torch.zeros(obj_fea.size(0), obj_embs.size(1)).to(device)
-        for i, (feature, code_book_feature) in enumerate(zip(obj_fea, obj_embs)):
-            obj_pred[i] = torch.matmul(feature.unsqueeze(0), torch.transpose(code_book_feature,0,1))
+        #     temp_attr_code_book = self.dset.attr_code_book.to(device)   # [attr_nums, obj_nums, 512]
+        #     attr_sim_code_book = torch.matmul(temp_attr_code_book, attr_fea.permute(1, 0))   # [attr_nums, obj_nums, batch]
+        #     attr_pred = self.softmax_with_temperature(torch.sum(torch.permute(attr_sim_code_book, (2, 0, 1)), dim=-1) / torch.sum(self.code_book_unseen_mask, dim=1),5)
 
-        score = torch.matmul(img_feats, pair_embeds) + (1/2 * (attr_pred.unsqueeze(2) + obj_pred.unsqueeze(1)).view(attr_pred.size(0),-1))
+        #     temp_obj_code_book = self.dset.obj_code_book.to(device)   # [attr_nums, obj_nums, 512]
+        #     obj_sim_code_book = torch.matmul(temp_obj_code_book, obj_fea.permute(1, 0))    # [attr_nums, obj_nums, batch]
+        #     obj_pred = self.softmax_with_temperature(torch.sum(torch.permute(obj_sim_code_book, (2, 1, 0)), dim=-1) / torch.sum(self.code_book_unseen_mask, dim=0),5)
+
+        
+        attr_pred = torch.matmul(attr_fea, attr_embs.T) * 0.5
+        obj_pred = torch.matmul(obj_fea, obj_embs.T) * 0.5
+
+        score = torch.matmul(img_feats, pair_embeds) + (attr_pred.unsqueeze(2) + obj_pred.unsqueeze(1)).view(attr_pred.size(0),-1) 
 
         scores = {}
         for itr, pair in enumerate(self.dset.pairs):
@@ -462,8 +427,8 @@ class GraphFull(nn.Module):
                     loss_con_neg=torch.tensor(0)
         else:
             if self.training:
-                CE_loss, pred = self.train_forward(x)
-                margin_loss=torch.tensor(0)
+                CE_loss, margin_loss, pred = self.train_forward(x)
+                # margin_loss=torch.tensor(0)
                 loss_con_pos=torch.tensor(0)
                 loss_con_neg=torch.tensor(0)
             else:

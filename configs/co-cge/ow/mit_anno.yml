@@ -39,5 +39,5 @@ training:
   update_features: true
   freeze_features: false
   use_code_book: true
-  train_triplet_loss: False
+  train_triplet_loss: false
 

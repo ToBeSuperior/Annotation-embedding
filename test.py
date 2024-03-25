@@ -212,9 +212,9 @@ def test_fast(image_extractor, model, testloader, evaluator, args, print_results
                 data[0] = image_extractor(data[0])
 
             if threshold is not None:
-                scores, _ = model.val_forward_with_threshold(data, threshold)
+                scores, _, _, _, _ = model.val_forward_with_threshold(data, threshold)
             else:
-                scores, _ = model(data)
+                scores, _, _, _, _ = model(data, False)
 
             scores = scores.to('cpu')
 
@@ -236,9 +236,9 @@ def test_fast(image_extractor, model, testloader, evaluator, args, print_results
             data[0] = image_extractor(data[0])
 
         if threshold is not None:
-            scores, _ = model.val_forward_with_threshold(data, threshold)
+            scores, _, _, _, _ = model.val_forward_with_threshold(data, threshold)
         else:
-            scores, _ = model(data)
+            scores, _, _, _, _ = model(data, False)
         scores = scores.to('cpu')
 
         attr_truth, obj_truth, pair_truth = data[1].to('cpu'), data[2].to('cpu'), data[3].to('cpu')

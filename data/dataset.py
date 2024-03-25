@@ -445,65 +445,6 @@ class CompositionDataset(Dataset):
 
         data = [img, self.attr2idx[attr], self.obj2idx[obj], self.pair2idx[(attr, obj)]]
         
-        if self.train_triplet_loss:
-            img_pos_obj = [_img for (_img, _attr, _obj) in self.train_data if _obj == obj and _attr == attr]
-            img_neg_obj = [_img for (_img, _att, _obj) in self.train_data if (_att == attr) and (_obj != obj)]
-            img_neg_attr = [_img for (_img, _att, _obj) in self.train_data if (_obj == obj) and (_att != attr)]
-
-
-            for i in range(len(img_pos_obj)):
-                img_pos_obj[i] = self.activations[img_pos_obj[i]]
-            if len(img_pos_obj) > 10:
-                img_pos_obj_feats = random.sample(img_pos_obj, 10)
-            else:
-                if len(img_pos_obj) != 0:
-                    img_pos_obj_feats = []
-                    while len(img_pos_obj_feats) < 10:
-                        for i in range(len(img_pos_obj)):
-                            img_pos_obj_feats.append(img_pos_obj[i])
-                            if len(img_pos_obj_feats) == 10:
-                                break
-                else:
-                    img_pos_obj_feats = torch.nan_to_num(torch.Tensor(10, 512), nan=0) #len(img_pos_obj[0]))
-
-
-            for i in range(len(img_neg_obj)):
-                img_neg_obj[i] = self.activations[img_neg_obj[i]]
-            if len(img_neg_obj) > 5:
-                img_neg_obj_feats = random.sample(img_neg_obj, 5)
-            else:
-                if len(img_neg_obj) != 0:
-                    img_neg_obj_feats = []
-                    while len(img_neg_obj_feats) < 5:
-                        for i in range(len(img_neg_obj)):
-                            img_neg_obj_feats.append(img_neg_obj[i])
-                            if len(img_neg_obj_feats) == 5:
-                                break
-                else:
-                    img_neg_obj_feats = torch.nan_to_num(torch.Tensor(5, 512), nan=0) #len(img_neg_obj[0]))
-
-
-            for i in range(len(img_neg_attr)):
-                img_neg_attr[i] = self.activations[img_neg_attr[i]]
-            if len(img_neg_attr) > 5:
-                img_neg_att_feats = random.sample(img_neg_attr, 5)
-            else:
-                if len(img_neg_attr) != 0:
-                    img_neg_att_feats = []
-                    while len(img_neg_att_feats) < 5:
-                        for i in range(len(img_neg_attr)):
-                            img_neg_att_feats.append(img_neg_attr[i])
-                            if len(img_neg_att_feats) == 5:
-                                break
-                else:
-                    img_neg_att_feats = torch.nan_to_num(torch.Tensor(5, 512), nan=0) #len(img_neg_attr[0]))
-
-            img_pos_obj_feats = torch.tensor(np.array([item.cpu().detach().numpy() for item in img_pos_obj_feats]))
-            img_neg_obj_feats = torch.tensor(np.array([item.cpu().detach().numpy() for item in img_neg_obj_feats]))
-            img_neg_att_feats = torch.tensor(np.array([item.cpu().detach().numpy() for item in img_neg_att_feats]))
-
-            data += [img_pos_obj_feats, torch.cat((img_neg_obj_feats, img_neg_att_feats),0)]
-
         # Return image paths if requested as the last element of the list
         if self.return_images and self.phase != 'train':
             data.append(image)
