@@ -32,7 +32,7 @@ rm GoogleNews-vectors-negative300.bin.gz
 
 ## Train
 
-### If you want to apply LeMA during training, enter the "--lema" argument. We provide the LeMA training option for three models (e.g., Co-CGE, CompCos, KG-SP).
+- If you want to apply LeMA during training, enter the "--lema" argument. We provide the LeMA training option for three models (e.g., Co-CGE, CompCos, KG-SP).
 
 ### train CGQA
 ```
