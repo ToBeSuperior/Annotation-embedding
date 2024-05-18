@@ -23,7 +23,7 @@ training:
   load:
   lr: 5.0e-05
   lrg: 0.001
-  margin: 0.4
+  margin: 0.1
   cosine_scale: 100
   max_epochs: 300
   norm_family: imagenet
