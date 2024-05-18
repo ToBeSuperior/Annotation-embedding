@@ -4,7 +4,6 @@ dataset:
   data_dir: cgqa
   dataset: cgqa
   splitname: compositional-split-natural
-  open_world: true
 model_params:
   model: kgsp
   partial: false
@@ -25,13 +24,13 @@ model_params:
   static_inp: false
 training:
   batch_size: 256
-  eval_val_every: 2
+  eval_val_every: 80
   load:
   lr: 5.0e-05
   wd: 5.0e-05
   lrg: 5.0e-06
   margin: 2
-  max_epochs: 100
+  max_epochs: 80
   norm_family: imagenet
   save_every: 10000
   test_batch_size: 256
