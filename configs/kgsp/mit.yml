@@ -1,10 +1,10 @@
+---
 experiment:
   name: kgsp/mitstates
 dataset:
   data_dir: mit-states
   dataset: mitstates
   splitname: compositional-split-natural
-  open_world: true
 model_params:
   model: kgsp
   gumbel: false
@@ -33,4 +33,3 @@ training:
   workers: 8
   update_features: true
   freeze_features: false
-  train_triplet_loss: false
