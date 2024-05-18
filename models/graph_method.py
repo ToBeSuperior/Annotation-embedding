@@ -292,10 +292,10 @@ class GraphFull(nn.Module):
             attr_negs_score = torch.stack([attr_pred[idx][torch.tensor(list(set(range(attr_pred.size(1))) - set(exclude)))] for idx, exclude in enumerate(attrs_list)])
             obj_negs_score = torch.stack([obj_pred[idx][torch.tensor(list(set(range(obj_pred.size(1))) - set(exclude)))] for idx, exclude in enumerate(objs_list)])
 
-            attr_lema_loss = torch.mean(attr_negs_score.sum(dim=1)) - torch.mean(attr_pos_score)
-            obj_lema_loss = torch.mean(obj_negs_score.sum(dim=1)) - torch.mean(obj_pos_score)
+            attr_lema_loss = torch.mean(attr_negs_score) - torch.mean(attr_pos_score)
+            obj_lema_loss = torch.mean(obj_negs_score) - torch.mean(obj_pos_score)
 
-            lema_loss = (attr_lema_loss + obj_lema_loss) * 0.3
+            lema_loss = self.args.alpha * (attr_lema_loss + obj_lema_loss)
             loss += lema_loss
 
         return loss, None
