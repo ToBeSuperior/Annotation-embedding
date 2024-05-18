@@ -8,8 +8,7 @@ from models.modular_methods import GatedGeneralNN
 from models.graph_method import GraphFull
 from models.symnet import Symnet
 from models.compcos import CompCos
-from models.classifier import Classifier
-from models.annoemb import Annoemb
+from models.kgsp import KGSP
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -32,14 +31,14 @@ def configure_model(args, dataset):
         model = Symnet(dataset, args)
     elif args.model == 'graphfull':
         model = GraphFull(dataset, args)
+        if args.feasibility_adjacency:
+            is_open = True
     elif args.model == 'compcos':
         model = CompCos(dataset, args)
         if dataset.open_world and not args.train_only:
             is_open = True
-    elif args.model == 'classifier':
-        model = Classifier(dataset, args)
-    elif args.model == 'annoemb' :
-        model = Annoemb(dataset, args)
+    elif args.model == 'kgsp':
+        model = KGSP(dataset, args)
     else:
         raise NotImplementedError
 
