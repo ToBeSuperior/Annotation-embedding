@@ -33,19 +33,20 @@ rm GoogleNews-vectors-negative300.bin.gz
 ## Train
 
 - If you want to apply LeMA during training, enter the "--lema" argument. We provide the LeMA training option for three models (e.g., Co-CGE, CompCos, KG-SP).
+- The '--fast_eval' argument helps make the evaluation process more efficient.
 
 ### train CGQA
 ```
-python train.py --config configs/anno/cgqa.yml
+python train.py --config configs/model_cfg_path/cgqa.yml (--lema)
 ```
 
 ### train MIT
 ```
-python train.py --config configs/anno/mit.yml
+python train.py --config configs/model_cfg_path/mit.yml (--lema)
 ```
 
 ### train UT-Zappos50k
 ```
-python train.py --config configs/anno/utzappos.yml
+python train.py --config configs/model_cfg_path/utzappos.yml (--lema)
 ```
 
