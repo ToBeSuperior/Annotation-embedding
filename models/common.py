@@ -204,14 +204,11 @@ def pairwise_distances(x, y=None):
         y_norm = x_norm.view(1, -1)
     
     dist = x_norm + y_norm - 2.0 * torch.mm(x, y_t)
-    # Ensure diagonal is zero if x=y
-    # if y is None:
-    #     dist = dist - torch.diag(dist.diag)
     return torch.clamp(dist, 0.0, np.inf)
 
 class Evaluator:
 
-    def __init__(self, dset, model):
+    def __init__(self, dset, model, fast=False):
 
         self.dset = dset
 
@@ -244,7 +241,7 @@ class Evaluator:
             key = (dset.attr2idx[attr], dset.obj2idx[obj])
             self.test_pair_dict[key] = [pair_val, 0, 0]
 
-        if dset.open_world:
+        if dset.open_world and not fast:
             masks = [1 for _ in dset.pairs]
         else:
             masks = [1 if pair in test_pair_set else 0 for pair in dset.pairs]
@@ -306,7 +303,7 @@ class Evaluator:
         results.update({'unbiased_closed': get_pred_from_scores(closed_orig_scores, topk)})
 
         # Object_oracle setting - set the score to -1e10 for all pairs where the true object does Not participate, can also use the closed score
-        mask = self.oracle_obj_mask[obj_truth.to(device="cpu")] #.to(device="cpu") 수정
+        mask = self.oracle_obj_mask[obj_truth]
         oracle_obj_scores = scores.clone()
         oracle_obj_scores[~mask] = -1e10
         oracle_obj_scores_unbiased = orig_scores.clone()
@@ -342,7 +339,7 @@ class Evaluator:
         '''
         # Go to CPU
         scores = {k: v.to('cpu') for k, v in scores.items()}
-        obj_truth = obj_truth.to(device)
+        # obj_truth = obj_truth.to(device)
 
         # Gather scores for all relevant (a,o) pairs
         scores = torch.stack(
@@ -368,8 +365,8 @@ class Evaluator:
 
         _, pair_pred = closed_scores.topk(topk, dim = 1) #sort returns indices of k largest values
         pair_pred = pair_pred.contiguous().view(-1)
-        attr_pred, obj_pred = self.pairs[pair_pred.to(device="cpu")][:, 0].view(-1, topk), \
-            self.pairs[pair_pred.to(device="cpu")][:, 1].view(-1, topk)
+        attr_pred, obj_pred = self.pairs[pair_pred][:, 0].view(-1, topk), \
+            self.pairs[pair_pred][:, 1].view(-1, topk)
 
         results.update({'closed': (attr_pred, obj_pred)})
         return results
@@ -404,24 +401,7 @@ class Evaluator:
             # Match of seen and unseen pairs
             seen_match = match[seen_ind]
             unseen_match = match[unseen_ind]
-            ### Calculating class average accuracy
-            
-            # local_score_dict = copy.deepcopy(self.test_pair_dict)
-            # for pair_gt, pair_pred in zip(pairs, match):
-            #     # print(pair_gt)
-            #     local_score_dict[pair_gt][2] += 1.0 #increase counter
-            #     if int(pair_pred) == 1:
-            #         local_score_dict[pair_gt][1] += 1.0
 
-            # # Now we have hits and totals for classes in evaluation set
-            # seen_score, unseen_score = [], []
-            # for key, (idx, hits, total) in local_score_dict.items():
-            #     score = hits/total
-            #     if bool(self.seen_mask[idx]) == True:
-            #         seen_score.append(score)
-            #     else:
-            #         unseen_score.append(score)
-            
             seen_score, unseen_score = torch.ones(512,5), torch.ones(512,5)
 
             return attr_match, obj_match, match, seen_match, unseen_match, \
@@ -512,4 +492,115 @@ class Evaluator:
         stats['hm_unseen'] = unseen_accuracy[idx]
         stats['hm_seen'] = seen_accuracy[idx]
         stats['best_hm'] = max_hm
+        return stats
+
+
+    def get_accuracies_fast(self, scores, attr_truth, obj_truth, pair_truth, bias=0., seen_mask=None,closed=False):
+        # Valid only for OW!!!
+
+        offset = len(self.dset.objs)
+        biased_scores =  ((scores + (1-self.seen_mask.float())*bias))
+        if closed:
+            biased_scores*=self.closed_mask
+
+        # Go to CPU
+        idx_attr, idx_obj, idx_pair = attr_truth.to('cpu'), obj_truth.to('cpu'), pair_truth.to('cpu')
+        if seen_mask == None:
+            seen_mask = torch.Tensor([self.seen_mask[p] for p in pair_truth])
+
+        unseen_mask = (1.-seen_mask).float()
+
+        idx_pred = biased_scores.max(1)[1]
+
+        correct_pair = idx_pred == idx_pair
+
+        attr_match = ((idx_pred//offset) == idx_attr).float()
+        obj_match = ((idx_pred%offset) == idx_obj).float()
+
+        seen_match = (correct_pair*seen_mask).sum()
+        unseen_match = (correct_pair * unseen_mask).sum()
+
+        return attr_match.sum(), obj_match.sum(), seen_match, unseen_match, seen_mask
+
+
+    def compute_biases(self, scores, attr_truth, obj_truth, pair_truth, previous_list = None, closed=False):
+
+        # Valid only for OW!!!
+
+        # Go to CPU
+        idx_attr, idx_obj, idx_pair = attr_truth.to('cpu'), obj_truth.to('cpu'), pair_truth.to('cpu')
+
+        if closed:
+            scores*=self.closed_mask
+
+        unseen_scores = scores - self.seen_mask*1e4
+        seen_scores = scores - (1.-self.seen_mask.float()) * 1e4
+
+        max_pred, idx_pred = unseen_scores.max(1)
+
+        correct_pair = idx_pred == idx_pair
+        if correct_pair.sum()==0:
+            return previous_list
+
+        correct_scores = max_pred[correct_pair]
+
+        max_seen_scores = seen_scores[correct_pair].max(1)[0]
+
+        # Getting difference between these scores
+        unseen_score_diff = max_seen_scores - correct_scores - 1e-4
+
+        if previous_list is not None:
+            unseen_score_diff = torch.cat([unseen_score_diff,previous_list],dim=0)
+
+        return unseen_score_diff
+
+    def get_biases(self,unseen_score_diff):
+        # sorting these diffs
+        try:
+            correct_unseen_score_diff = torch.sort(unseen_score_diff)[0]
+        except:
+            print('Warning: no correct prediction for unseen compositions')
+            correct_unseen_score_diff = torch.FloatTensor([100])
+        magic_binsize = 20
+        # getting step size for these bias values
+        bias_skip = max(len(correct_unseen_score_diff) // magic_binsize, 1)
+        # Getting list
+        biaslist = correct_unseen_score_diff[::bias_skip]
+
+        return biaslist
+
+
+    def collect_results(self,biaslist,results):
+        stats = {}
+        seen_accuracy = []
+        unseen_accuracy = []
+        for bias in biaslist:
+            seen_match = float(results[bias]['seen'])
+            unseen_match = float(results[bias]['unseen'])
+            seen_accuracy.append(seen_match)
+            unseen_accuracy.append(unseen_match)
+
+        seen_accuracy, unseen_accuracy = np.array(seen_accuracy), np.array(unseen_accuracy)
+        area = np.trapz(seen_accuracy, unseen_accuracy)
+
+        harmonic_mean = hmean([seen_accuracy, unseen_accuracy], axis=0)
+        max_hm = np.max(harmonic_mean)
+        idx = np.argmax(harmonic_mean)
+
+        bias_term = biaslist[idx]
+
+        stats['biasterm'] = bias_term
+        stats['best_unseen'] = np.max(unseen_accuracy)
+        stats['best_seen'] = np.max(seen_accuracy)
+        stats['AUC'] = area
+        stats['hm_unseen'] = unseen_accuracy[idx]
+        stats['hm_seen'] = seen_accuracy[idx]
+        stats['biased_unseen'] = unseen_accuracy[-1]
+        stats['biased_seen'] = seen_accuracy[-1]
+        stats['best_hm'] = max_hm
+        stats['hm_attr'] = results[bias_term]['attr_match']
+        stats['hm_obj'] = results[bias_term]['obj_match']
+        stats['b_attr'] = results[biaslist[-1]]['attr_match']
+        stats['b_obj'] = results[biaslist[-1]]['obj_match']
+
         return stats
