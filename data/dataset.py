@@ -15,6 +15,7 @@ from utils.utils import get_norm_values, chunks
 from models.image_extractor import get_image_extractor
 from itertools import product
 import re
+import pickle
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -113,7 +114,6 @@ class CompositionDataset(Dataset):
         num_negs = 1,
         pair_dropout = 0.0,
         update_features = False,
-        train_triplet_loss = False,
         return_images = False,
         train_only = False,
         open_world=True
@@ -126,7 +126,6 @@ class CompositionDataset(Dataset):
         self.norm_family = norm_family
         self.return_images = return_images
         self.update_features = update_features
-        self.train_triplet_loss = train_triplet_loss
         self.feat_dim = 512 if 'resnet18' in model else 2048 # todo, unify this  with models
         self.open_world = open_world
 
@@ -138,6 +137,8 @@ class CompositionDataset(Dataset):
         # Clean only was here
         self.obj2idx = {obj: idx for idx, obj in enumerate(self.objs)}
         self.attr2idx = {attr : idx for idx, attr in enumerate(self.attrs)}
+        self.idx2obj = {idx: obj for idx, obj in enumerate(self.objs)}
+        self.idx2attr = {idx: attr for idx, attr in enumerate(self.attrs)}
         if self.open_world:
             self.pairs = self.full_pairs
 
@@ -149,6 +150,7 @@ class CompositionDataset(Dataset):
         else:
             print('Using all pairs')
             self.pair2idx = {pair : idx for idx, pair in enumerate(self.pairs)}
+        self.idx2pair = {idx: pair for idx, pair in enumerate(self.pairs)}
         
         if self.phase == 'train':
             self.data = self.train_data
@@ -202,13 +204,26 @@ class CompositionDataset(Dataset):
 
         self.sample_indices = list(range(len(self.data)))
         self.sample_pairs = self.train_pairs
-        self.word_code_book = None
-        self.img_code_book = None
+        
+        if 'ut' in self.root:
+            fo=open('utils/partial_utzappos_split.pkl','rb')
+            sample_mask = pickle.load(fo)
+        elif 'mit' in self.root:
+            fo=open('utils/partial_mitstates_split.pkl','rb')
+            sample_mask = pickle.load(fo)
+        elif 'cgqa' in self.root:
+            fo = open('utils/partial_cgqa_split.pkl','rb')
+            sample_mask = pickle.load(fo)
+
+        self.sample_mask = sample_mask
+        #self.sample_indices = list(range(len(self.data)))
+        #self.sample_mask = [random.randint(0,1) for i in range(len(self.data))]
+        self.sample_pairs = self.train_pairs
 
         # Load based on what to output
         self.transform = dataset_transform(self.phase, self.norm_family)
         self.loader = ImageLoader(ospj(self.root, 'images'))
-        if not self.update_features or self.train_triplet_loss:
+        if not self.update_features:
             feat_file = ospj(root, model+'_featurers.t7')
             print(f'Using {model} and feature file {feat_file}')
             if not os.path.exists(feat_file):
@@ -221,16 +236,7 @@ class CompositionDataset(Dataset):
             self.feat_dim = activation_data['features'].size(1)
             print('{} activations loaded'.format(len(self.activations)))
 
-            self.fea_dict = dict()
-
-            for i, sample in enumerate(self.data):
-                key_class = sample[1] + '_' + sample[2]
-                feature = self.activations[sample[0]]
-                try:
-                    self.fea_dict[key_class] = torch.cat( (self.fea_dict[key_class], feature.unsqueeze(0)), dim=0 )
-                except:
-                    self.fea_dict[key_class] = feature.unsqueeze(0)
-
+           
     def parse_split(self):
         '''
         Helper function to read splits of object atrribute pair
@@ -437,72 +443,35 @@ class CompositionDataset(Dataset):
 
         # Decide what to output
         # Train annotation classifier with pretrained Resnet feature
-        if not self.update_features or self.train_triplet_loss:
+        if not self.update_features:
             img = self.activations[image]
         else:
             img = self.loader(image)
             img = self.transform(img)
 
-        data = [img, self.attr2idx[attr], self.obj2idx[obj], self.pair2idx[(attr, obj)]]
+        data = [img, self.attr2idx[attr], self.obj2idx[obj], self.pair2idx[(attr, obj)], self.sample_mask[index]]
         
-        if self.train_triplet_loss:
-            img_pos_obj = [_img for (_img, _attr, _obj) in self.train_data if _obj == obj and _attr == attr]
-            img_neg_obj = [_img for (_img, _att, _obj) in self.train_data if (_att == attr) and (_obj != obj)]
-            img_neg_attr = [_img for (_img, _att, _obj) in self.train_data if (_obj == obj) and (_att != attr)]
+        if self.phase == 'train':
+            all_neg_attrs = []
+            all_neg_objs = []
 
+            for curr in range(self.num_negs):
+                neg_attr, neg_obj = self.sample_negative(attr, obj) # negative for triplet lose
+                all_neg_attrs.append(neg_attr)
+                all_neg_objs.append(neg_obj)
 
-            for i in range(len(img_pos_obj)):
-                img_pos_obj[i] = self.activations[img_pos_obj[i]]
-            if len(img_pos_obj) > 10:
-                img_pos_obj_feats = random.sample(img_pos_obj, 10)
+            neg_attr, neg_obj = torch.LongTensor(all_neg_attrs), torch.LongTensor(all_neg_objs)
+            
+            #note here
+            if len(self.train_obj_affordance[obj])>1:
+                  inv_attr = self.sample_train_affordance(attr, obj) # attribute for inverse regularizer
             else:
-                if len(img_pos_obj) != 0:
-                    img_pos_obj_feats = []
-                    while len(img_pos_obj_feats) < 10:
-                        for i in range(len(img_pos_obj)):
-                            img_pos_obj_feats.append(img_pos_obj[i])
-                            if len(img_pos_obj_feats) == 10:
-                                break
-                else:
-                    img_pos_obj_feats = torch.nan_to_num(torch.Tensor(10, 512), nan=0) #len(img_pos_obj[0]))
+                  inv_attr = (all_neg_attrs[0]) 
 
+            comm_attr = self.sample_affordance(inv_attr, obj) # attribute for commutative regularizer
+            
 
-            for i in range(len(img_neg_obj)):
-                img_neg_obj[i] = self.activations[img_neg_obj[i]]
-            if len(img_neg_obj) > 5:
-                img_neg_obj_feats = random.sample(img_neg_obj, 5)
-            else:
-                if len(img_neg_obj) != 0:
-                    img_neg_obj_feats = []
-                    while len(img_neg_obj_feats) < 5:
-                        for i in range(len(img_neg_obj)):
-                            img_neg_obj_feats.append(img_neg_obj[i])
-                            if len(img_neg_obj_feats) == 5:
-                                break
-                else:
-                    img_neg_obj_feats = torch.nan_to_num(torch.Tensor(5, 512), nan=0) #len(img_neg_obj[0]))
-
-
-            for i in range(len(img_neg_attr)):
-                img_neg_attr[i] = self.activations[img_neg_attr[i]]
-            if len(img_neg_attr) > 5:
-                img_neg_att_feats = random.sample(img_neg_attr, 5)
-            else:
-                if len(img_neg_attr) != 0:
-                    img_neg_att_feats = []
-                    while len(img_neg_att_feats) < 5:
-                        for i in range(len(img_neg_attr)):
-                            img_neg_att_feats.append(img_neg_attr[i])
-                            if len(img_neg_att_feats) == 5:
-                                break
-                else:
-                    img_neg_att_feats = torch.nan_to_num(torch.Tensor(5, 512), nan=0) #len(img_neg_attr[0]))
-
-            img_pos_obj_feats = torch.tensor(np.array([item.cpu().detach().numpy() for item in img_pos_obj_feats]))
-            img_neg_obj_feats = torch.tensor(np.array([item.cpu().detach().numpy() for item in img_neg_obj_feats]))
-            img_neg_att_feats = torch.tensor(np.array([item.cpu().detach().numpy() for item in img_neg_att_feats]))
-
-            data += [img_pos_obj_feats, torch.cat((img_neg_obj_feats, img_neg_att_feats),0)]
+            data += [neg_attr, neg_obj, inv_attr, comm_attr]
 
         # Return image paths if requested as the last element of the list
         if self.return_images and self.phase != 'train':
