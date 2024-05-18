@@ -1,5 +1,7 @@
-# Annotation-embedding
-
+# LeMA (Leveraging Misleading Answer)
+---
+This is the PyTorch code of the works Focusing valid search space in Open-World Compositional Zero-Shot Learning by leveraging misleading answers.
+The code provides the implementation of our proposed training method, LeMA, with other baselines (e.g. SymNet, AoP, TMN, LabelEmbed+,RedWine).
 
 
 
@@ -44,3 +46,4 @@ python train.py --config configs/anno/mit.yml
 ```
 python train.py --config configs/anno/utzappos.yml
 ```
+
