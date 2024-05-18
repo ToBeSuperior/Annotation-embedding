@@ -114,6 +114,11 @@ class GCN(nn.Module):
             for conv in self.layers:
                 x = conv(x, self.adj)
         return F.normalize(x)
+    
+    def update_adj(self,adj):
+        adj = normt_spm(adj, method='in')
+        adj = spm_to_tensor(adj)
+        self.adj = adj.to(device)
 
 ### GCNII
 class GraphConvolution(nn.Module):
