@@ -8,8 +8,8 @@ from flags import DATA_FOLDER
 cudnn.benchmark = True
 
 # Python imports
-import tqdm
 from tqdm import tqdm
+import pickle
 import os
 from os.path import join as ospj
 
@@ -30,6 +30,8 @@ def main():
     logpath = args.logpath
     config = [os.path.join(logpath, _) for _ in os.listdir(logpath) if _.endswith('yml')][0]
     load_args(config, args)
+
+    assert not (args.model=='symnet' and args.fast_eval), "fast_eval is currently not available for SymNet"
 
     # Get dataset
     trainset = dset.CompositionDataset(
@@ -57,7 +59,7 @@ def main():
         valset,
         batch_size=args.test_batch_size,
         shuffle=False,
-        num_workers=8)
+        num_workers=args.workers)
 
     testset = dset.CompositionDataset(
         root=os.path.join(DATA_FOLDER,args.data_dir),
@@ -82,14 +84,6 @@ def main():
 
     args.load = ospj(logpath,'ckpt_best_auc.t7')
 
-    if args.use_code_book : 
-        path = 'DATA_ROOT/' + args.data_dir 
-        print('stored code book loading...')
-        db = torch.load(path + '/code_book.pt')
-        model.dset.code_book = db['code_book']
-        model.dset.train_triplet_loss = False
-        model.load_state_dict(torch.load('DATA_ROOT/' + args.data_dir + '/pretrained.pt'))
-        
     checkpoint = torch.load(args.load)
     if image_extractor:
         try:
@@ -99,6 +93,10 @@ def main():
             print('No Image extractor in checkpoint')
     model.load_state_dict(checkpoint['net'])
     model.eval()
+
+    if args.feasibility_adjacency:
+        print('Updating adjacency matrix')
+        model.update_adj(100)
 
     threshold = None
     if args.open_world and args.hard_masking:
@@ -129,7 +127,10 @@ def main():
     evaluator = Evaluator(testset, model)
 
     with torch.no_grad():
-        test(image_extractor, model, testloader, evaluator, args, threshold)
+        if args.fast_eval:
+            test_fast(image_extractor, model, testloader, evaluator, args, threshold=threshold)
+        else:
+            test(image_extractor, model, testloader, evaluator, args, threshold=threshold)
 
 
 def test(image_extractor, model, testloader, evaluator,  args, threshold=None, print_results=True):
@@ -146,7 +147,7 @@ def test(image_extractor, model, testloader, evaluator,  args, threshold=None, p
             if image_extractor:
                 data[0] = image_extractor(data[0])
             if threshold is None:
-                _,_, predictions, _, _ = model(data, False)
+                _, predictions = model(data)
             else:
                 _, predictions = model.val_forward_with_threshold(data,threshold)
 
@@ -190,6 +191,93 @@ def test(image_extractor, model, testloader, evaluator,  args, threshold=None, p
             print(result)
         return results
 
+
+def test_fast(image_extractor, model, testloader, evaluator, args, print_results=True, threshold=None,
+              biaslist=None):
+    '''
+    Runs testing for an epoch
+    '''
+
+    if image_extractor:
+        image_extractor.eval()
+
+    model.eval()
+
+    bias = args.bias  # if not args.open_world else 0.
+    if biaslist is None:
+        for idx, data in tqdm(enumerate(testloader), total=len(testloader), desc='Computing bias'):
+            data = [d.to(device) for d in data]
+
+            if image_extractor:
+                data[0] = image_extractor(data[0])
+
+            if threshold is not None:
+                scores, _ = model.val_forward_with_threshold(data, threshold)
+            else:
+                scores, _ = model(data)
+
+            scores = scores.to('cpu')
+
+            attr_truth, obj_truth, pair_truth = data[1].to('cpu'), data[2].to('cpu'), data[3].to('cpu')
+
+            biaslist = evaluator.compute_biases(scores.to('cpu'), attr_truth, obj_truth, pair_truth,
+                                                previous_list=biaslist, closed=args.closed_eval)
+
+        biaslist = list(evaluator.get_biases(biaslist).numpy())
+        biaslist.append(bias)
+
+    results = {b: {'unseen': 0., 'seen': 0., 'total_unseen': 0., 'total_seen': 0., 'attr_match': 0., 'obj_match': 0.}
+               for b in biaslist}
+
+    for idx, data in tqdm(enumerate(testloader), total=len(testloader), desc='Testing'):
+        data = [d.to(device) for d in data]
+
+        if image_extractor:
+            data[0] = image_extractor(data[0])
+
+        if threshold is not None:
+            scores, _ = model.val_forward_with_threshold(data, threshold)
+        else:
+            scores, _ = model(data)
+        scores = scores.to('cpu')
+
+        attr_truth, obj_truth, pair_truth = data[1].to('cpu'), data[2].to('cpu'), data[3].to('cpu')
+
+        seen_mask = None
+
+        for b in biaslist:
+            attr_match, obj_match, seen_match, unseen_match, seen_mask = \
+                evaluator.get_accuracies_fast(scores, attr_truth, obj_truth, pair_truth, bias=b, seen_mask=seen_mask,
+                                              closed=args.closed_eval)
+
+            results[b]['unseen'] += unseen_match.item()
+            results[b]['seen'] += seen_match.item()
+            results[b]['total_unseen'] += scores.shape[0] - seen_mask.sum().item()
+            results[b]['total_seen'] += seen_mask.sum().item()
+            results[b]['attr_match'] += attr_match.item()
+            results[b]['obj_match'] += obj_match.item()
+
+    for b in biaslist:
+        results[b]['unseen'] /= results[b]['total_unseen']
+        results[b]['seen'] /= results[b]['total_seen']
+        results[b]['attr_match'] /= (results[b]['total_seen'] + results[b]['total_unseen'])
+        results[b]['obj_match'] /= (results[b]['total_seen'] + results[b]['total_unseen'])
+
+    stats = evaluator.collect_results(biaslist, results)
+
+    result = ''
+    # write to Tensorboard
+    for key in stats:
+        result = result + key + '  ' + str(round(stats[key], 5)) + '| '
+
+    result = result + args.name
+    fo = open('exps.pkl', 'ab')
+    pickle.dump(stats, fo)
+    fo.close()
+    if print_results:
+        print(f'Results')
+        print(result)
+    return stats, biaslist
 
 if __name__ == '__main__':
     main()
