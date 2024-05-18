@@ -40,7 +40,8 @@ class CompCos(nn.Module):
 
         # Validation
         self.val_attrs, self.val_objs, self.val_pairs = get_all_ids(self.dset.pairs)
-
+        self.attrs = dset.attrs
+        self.objs = dset.objs
         # for indivual projections
         self.uniq_attrs, self.uniq_objs = torch.arange(len(self.dset.attrs)).long().to(device), \
                                           torch.arange(len(self.dset.objs)).long().to(device)
@@ -58,8 +59,6 @@ class CompCos(nn.Module):
             self.activated = False
 
             # Init feasibility-related variables
-            self.attrs = dset.attrs
-            self.objs = dset.objs
             self.possible_pairs = dset.pairs
 
             self.validation_pairs = dset.val_pairs
@@ -100,6 +99,10 @@ class CompCos(nn.Module):
         self.image_embedder = MLP(dset.feat_dim, int(args.emb_dim), relu=args.relu, num_layers=args.nlayers,
                                   dropout=self.args.dropout,
                                   norm=self.args.norm, layers=layers)
+        self.img2attr = MLP(dset.feat_dim, args.emb_dim, relu=args.relu, num_layers=args.nlayers, dropout=self.args.dropout,
+                                  norm=self.args.norm, layers=layers)
+        self.img2obj = MLP(dset.feat_dim, args.emb_dim, relu=args.relu, num_layers=args.nlayers, dropout=self.args.dropout,
+                                  norm=self.args.norm, layers=layers)
 
         # Fixed
         self.composition = args.composition
@@ -124,6 +127,8 @@ class CompCos(nn.Module):
 
         # Composition MLP
         self.projection = nn.Linear(input_dim * 2, args.emb_dim)
+        self.attr_projection = nn.Linear(input_dim, args.emb_dim)
+        self.obj_projection = nn.Linear(input_dim, args.emb_dim)
 
 
     def freeze_representations(self):
@@ -193,25 +198,72 @@ class CompCos(nn.Module):
 
 
     def val_forward(self, x):
-        img = x[0]
+        img, attrs, objs = x[0], x[1], x[2]
         img_feats = self.image_embedder(img)
         img_feats_normed = F.normalize(img_feats, dim=1)
-        pair_embeds = self.compose(self.val_attrs, self.val_objs).permute(1, 0)  # Evaluate all pairs
-        score = torch.matmul(img_feats_normed, pair_embeds)
+        pair_embeds = self.compose(self.val_attrs, self.val_objs).permute(1, 0)
 
+        pair_preds = torch.matmul(img_feats_normed, pair_embeds)
+        score = pair_preds
+        
+        if self.args.lema:
+            attr_embed, obj_embed = self.attr_embedder(self.uniq_attrs), self.obj_embedder(self.uniq_objs)
+            attr_embed, obj_embed = self.attr_projection(attr_embed), self.obj_projection(obj_embed)
+            attr_embed_normed, obj_embed_normed = F.normalize(attr_embed, dim=1), F.normalize(obj_embed, dim=1)
+            
+            attr_feats = self.img2attr(img)
+            obj_feats = self.img2obj(img)
+            
+            attr_feats_normed = F.normalize(attr_feats, dim=1)
+            obj_feats_normed = F.normalize(obj_feats, dim=1)
+            
+            attr_pred = torch.matmul(attr_feats_normed, attr_embed_normed.permute(1, 0))
+            obj_pred = torch.matmul(obj_feats_normed, obj_embed_normed.permute(1, 0))
+            
+            attr_pos_score = attr_pred[torch.arange(len(attrs)), attrs[torch.arange(len(attrs))]]
+            obj_pos_score = obj_pred[torch.arange(len(objs)), objs[torch.arange(len(objs))]]
+
+            attrs_list = [[x] for x in attrs.tolist()]
+            objs_list = [[x] for x in objs.tolist()]
+            attr_negs_score = torch.stack([attr_pred[idx][torch.tensor(list(set(range(attr_pred.size(1))) - set(exclude)))] for idx, exclude in enumerate(attrs_list)])
+            obj_negs_score = torch.stack([obj_pred[idx][torch.tensor(list(set(range(obj_pred.size(1))) - set(exclude)))] for idx, exclude in enumerate(objs_list)])
+            
+            lema_preds = (attr_pred.unsqueeze(2) + obj_pred.unsqueeze(1)).view(attr_pred.size(0),-1)
+            score = pair_preds + torch.min(lema_preds, torch.tensor(0.))
+            
         scores = {}
         for itr, pair in enumerate(self.dset.pairs):
             scores[pair] = score[:, self.dset.all_pair2idx[pair]]
 
-        return None, scores
+        return score, scores
 
 
     def val_forward_with_threshold(self, x, th=0.):
-        img = x[0]
+        img, attrs, objs = x[0], x[1], x[2]
         img_feats = self.image_embedder(img)
         img_feats_normed = F.normalize(img_feats, dim=1)
-        pair_embeds = self.compose(self.val_attrs, self.val_objs).permute(1, 0)  # Evaluate all pairs
-        score = torch.matmul(img_feats_normed, pair_embeds)
+        pair_embeds = self.compose(self.val_attrs, self.val_objs).permute(1, 0)
+
+        pair_preds = torch.matmul(img_feats_normed, pair_embeds)
+        score = pair_preds
+        
+        if self.args.lema:
+            
+            attr_embed, obj_embed = self.attr_embedder(self.uniq_attrs), self.obj_embedder(self.uniq_objs)
+            attr_embed, obj_embed = self.attr_projection(attr_embed), self.obj_projection(obj_embed)
+            attr_embed_normed, obj_embed_normed = F.normalize(attrs, dim=1), F.normalize(objs, dim=1)
+            
+            attr_feats = self.img2attr(img)
+            obj_feats = self.img2obj(img)
+            
+            attr_feats_normed = F.normalize(attr_feats, dim=1)
+            obj_feats_normed = F.normalize(obj_feats, dim=1)
+            
+            attr_pred = torch.matmul(attr_feats_normed, attr_embed_normed.permute(1, 0))
+            obj_pred = torch.matmul(obj_feats_normed, obj_embed_normed.permute(1, 0))
+            
+            lema_preds = (attr_pred.unsqueeze(2) + obj_pred.unsqueeze(1)).view(attr_pred.size(0),-1)
+            score = pair_preds + torch.min(lema_preds, torch.tensor(0.))
 
         # Note: Pairs are already aligned here
         mask = (self.feasibility_scores>=th).float()
@@ -221,24 +273,53 @@ class CompCos(nn.Module):
         for itr, pair in enumerate(self.dset.pairs):
             scores[pair] = score[:, self.dset.all_pair2idx[pair]]
 
-        return None, scores
+        return score, scores
 
 
     def train_forward_open(self, x):
         img, attrs, objs, pairs = x[0], x[1], x[2], x[3]
         img_feats = self.image_embedder(img)
-
-        pair_embed = self.compose(self.train_attrs, self.train_objs).permute(1, 0)
         img_feats_normed = F.normalize(img_feats, dim=1)
+        pair_embeds = self.compose(self.train_attrs, self.train_objs).permute(1, 0)
 
-        pair_pred = torch.matmul(img_feats_normed, pair_embed)
+        pair_preds = torch.matmul(img_feats_normed, pair_embeds)
 
         if self.activated:
-            pair_pred += (1 - self.seen_mask) * self.feasibility_margin
-            loss_cos = F.cross_entropy(self.scale * pair_pred, pairs)
+            pair_preds += (1 - self.seen_mask) * self.feasibility_margin
+            loss_cos = F.cross_entropy(self.scale * pair_preds, pairs)
         else:
-            pair_pred = pair_pred * self.seen_mask + (1 - self.seen_mask) * (-10)
-            loss_cos = F.cross_entropy(self.scale * pair_pred, pairs)
+            pair_preds = pair_preds * self.seen_mask + (1 - self.seen_mask) * (-10)
+            loss_cos = F.cross_entropy(self.scale * pair_preds, pairs)
+            
+        if self.args.lema:
+            
+            attr_embed, obj_embed = self.attr_embedder(self.uniq_attrs), self.obj_embedder(self.uniq_objs)
+            attr_embed, obj_embed = self.attr_projection(attr_embed), self.obj_projection(obj_embed)
+            attr_embed_normed, obj_embed_normed = F.normalize(attr_embed, dim=1), F.normalize(obj_embed, dim=1)
+            
+            attr_feats = self.img2attr(img)
+            obj_feats = self.img2obj(img)
+            
+            attr_feats_normed = F.normalize(attr_feats, dim=1)
+            obj_feats_normed = F.normalize(obj_feats, dim=1)
+            
+            attr_pred = torch.matmul(attr_feats_normed, attr_embed_normed.permute(1, 0))
+            obj_pred = torch.matmul(obj_feats_normed, obj_embed_normed.permute(1, 0))
+            
+            attr_pos_score = attr_pred[torch.arange(len(attrs)), attrs[torch.arange(len(attrs))]]
+            obj_pos_score = obj_pred[torch.arange(len(objs)), objs[torch.arange(len(objs))]]
+
+            attrs_list = [[x] for x in attrs.tolist()]
+            objs_list = [[x] for x in objs.tolist()]
+            attr_negs_score = torch.stack([attr_pred[idx][torch.tensor(list(set(range(attr_pred.size(1))) - set(exclude)))] for idx, exclude in enumerate(attrs_list)])
+            obj_negs_score = torch.stack([obj_pred[idx][torch.tensor(list(set(range(obj_pred.size(1))) - set(exclude)))] for idx, exclude in enumerate(objs_list)])
+            
+            attr_lema_loss = torch.mean(attr_negs_score) - torch.mean(attr_pos_score)
+            obj_lema_loss = torch.mean(obj_negs_score) - torch.mean(obj_pos_score)
+            
+            lema_loss = self.args.alpha * (attr_lema_loss + obj_lema_loss)
+            
+            loss_cos = loss_cos.mean() + lema_loss
 
         return loss_cos.mean(), None
 
@@ -246,24 +327,49 @@ class CompCos(nn.Module):
     def train_forward_closed(self, x):
         img, attrs, objs, pairs = x[0], x[1], x[2], x[3]
         img_feats = self.image_embedder(img)
-
-        pair_embed = self.compose(self.train_attrs, self.train_objs).permute(1, 0)
         img_feats_normed = F.normalize(img_feats, dim=1)
+        pair_embeds = self.compose(self.train_attrs, self.train_objs).permute(1, 0)
 
-        pair_pred = torch.matmul(img_feats_normed, pair_embed)
+        pair_preds = torch.matmul(img_feats_normed, pair_embeds)
+        
+        if self.args.lema:
+            
+            attr_embed, obj_embed = self.attr_embedder(self.uniq_attrs), self.obj_embedder(self.uniq_objs)
+            attr_embed, obj_embed = self.attr_projection(attr_embed), self.obj_projection(obj_embed)
+            attr_embed_normed, obj_embed_normed = F.normalize(attrs, dim=1), F.normalize(objs, dim=1)
+            
+            attr_feats = self.img2attr(img)
+            obj_feats = self.img2obj(img)
+            
+            attr_feats_normed = F.normalize(attr_feats, dim=1)
+            obj_feats_normed = F.normalize(obj_feats, dim=1)
+            
+            attr_pred = torch.matmul(attr_feats_normed, attr_embed_normed.permute(1, 0))
+            obj_pred = torch.matmul(obj_feats_normed, obj_embed_normed.permute(1, 0))
+            
+            attr_pos_score = attr_pred[torch.arange(len(attrs)), attrs[torch.arange(len(attrs))]]
+            obj_pos_score = obj_pred[torch.arange(len(objs)), objs[torch.arange(len(objs))]]
 
-        loss_cos = F.cross_entropy(self.scale * pair_pred, pairs)
-
+            attrs_list = [[x] for x in attrs.tolist()]
+            objs_list = [[x] for x in objs.tolist()]
+            attr_negs_score = torch.stack([attr_pred[idx][torch.tensor(list(set(range(attr_pred.size(1))) - set(exclude)))] for idx, exclude in enumerate(attrs_list)])
+            obj_negs_score = torch.stack([obj_pred[idx][torch.tensor(list(set(range(obj_pred.size(1))) - set(exclude)))] for idx, exclude in enumerate(objs_list)])
+            
+            attr_lema_loss = torch.mean(attr_negs_score) - torch.mean(attr_pos_score)
+            obj_lema_loss = torch.mean(obj_negs_score) - torch.mean(obj_pos_score)
+            
+            lema_loss = self.args.alpha * (attr_lema_loss + obj_lema_loss)
+            
+            loss_cos = loss_cos.mean() + lema_loss
+            
         return loss_cos.mean(), None
 
 
     def forward(self, x):
         if self.training:
             loss, pred = self.train_forward(x)
+            return loss, pred
         else:
             with torch.no_grad():
-                loss, pred = self.val_forward(x)
-        return loss, pred
-
-
-
+                fast_pred, pred = self.val_forward(x)
+            return fast_pred, pred
