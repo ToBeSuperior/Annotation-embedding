@@ -301,7 +301,7 @@ class GraphFull(nn.Module):
         return loss, None
 
     def val_forward_dotpr(self, x):
-        img, attrs, objs, pairs = x[0], x[1], x[2], x[3]
+        img = x[0]
 
         if self.args.nlayers:
             img_feats = self.image_embedder(img)
