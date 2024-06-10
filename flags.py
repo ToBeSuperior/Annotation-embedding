@@ -78,9 +78,6 @@ parser.add_argument("--gr_emb", default='d4096,d',help="graph layers config")
 parser.add_argument("--cosine_classifier", action='store_true', default=False, help="use a cosine classifier (Co-CGE)")
 parser.add_argument("--feasibility_adjacency", action='store_true', default=False, help="weight the graph connections by the feasibility scores (Co-CGE)")
 
-# LeMA
-parser.add_argument('--lema', action="store_true", help='apply lema training')
-
 # Hyperparameters
 parser.add_argument('--topk', type=int, default=1,help="Compute topk accuracy")
 parser.add_argument('--margin', type=float, default=2,help="Margin for triplet loss or feasibility scores in CompCos")
