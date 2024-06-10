@@ -37,3 +37,5 @@ training:
   workers: 8
   update_features: true
   freeze_featues: false
+  lema: true
+  alpha: 0.1
