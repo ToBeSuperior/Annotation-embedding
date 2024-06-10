@@ -63,6 +63,11 @@ class GraphConv(nn.Module):
             outputs = self.relu(outputs)
         return outputs
 
+    def update_adj(self,adj):
+        adj = normt_spm(adj, method='in')
+        adj = spm_to_tensor(adj)
+        self.adj = adj.to(device)
+
 
 class GCN(nn.Module):
 
@@ -72,8 +77,6 @@ class GCN(nn.Module):
         adj = normt_spm(adj, method='in')
         adj = spm_to_tensor(adj)
         self.adj = adj.to(device)
-
-        self.train_adj = self.adj
 
         hl = hidden_layers.split(',')
         if hl[-1] == 'd':
@@ -107,14 +110,10 @@ class GCN(nn.Module):
         self.layers = layers
 
     def forward(self, x):
-        if self.training:
-            for conv in self.layers:
-                x = conv(x, self.train_adj)
-        else:
-            for conv in self.layers:
-                x = conv(x, self.adj)
+        for conv in self.layers:
+            x = conv(x, self.adj)
         return F.normalize(x)
-    
+
     def update_adj(self,adj):
         adj = normt_spm(adj, method='in')
         adj = spm_to_tensor(adj)
