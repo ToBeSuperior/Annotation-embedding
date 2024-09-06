@@ -242,12 +242,14 @@ class GraphFull(nn.Module):
 
         if self.args.nlayers:
             img_feats = self.image_embedder(img)
-            
             if self.args.lema:
                 attr_feats = self.img2attr(img)
                 obj_feats = self.img2obj(img)
         else:
             img_feats = (img)
+            if self.args.lema:
+                attr_feats = (img)
+                obj_feats = (img)
 
         if self.cosloss:
             img_feats = F.normalize(img_feats, dim=1)
@@ -267,11 +269,6 @@ class GraphFull(nn.Module):
         pair_embed = pair_embed.permute(1, 0)
         pair_pred = torch.matmul(img_feats, pair_embed)
 
-        if self.args.lema:
-            attr_embs = current_embeddings[:self.num_attrs]
-            obj_embs = current_embeddings[self.num_attrs:self.num_attrs+self.num_objs]
-
-
         if self.cosloss:
             if self.dset.open_world:
                 pair_pred = (pair_pred + self.feasibility_margins) * self.scale
@@ -281,6 +278,9 @@ class GraphFull(nn.Module):
         loss = F.cross_entropy(pair_pred, pairs)
 
         if self.args.lema:
+            attr_embs = current_embeddings[:self.num_attrs]
+            obj_embs = current_embeddings[self.num_attrs:self.num_attrs+self.num_objs]
+            
             attr_pred = torch.matmul(attr_feats, attr_embs.T) * 0.5
             obj_pred = torch.matmul(obj_feats, obj_embs.T) * 0.5
 
@@ -306,10 +306,13 @@ class GraphFull(nn.Module):
         if self.args.nlayers:
             img_feats = self.image_embedder(img)
             if self.args.lema:
-                obj_feats = self.img2obj(img)
                 attr_feats = self.img2attr(img)
+                obj_feats = self.img2obj(img)
         else:
             img_feats = (img)  
+            if self.args.lema:
+                attr_feats = (img)
+                obj_feats = (img)
 
         if self.cosloss:
             img_feats = F.normalize(img_feats, dim=1)
