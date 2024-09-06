@@ -218,7 +218,7 @@ def test(epoch, image_extractor, model, testloader, evaluator, writer, args, log
     if stats['best_hm'] > best_hm:
         best_hm = stats['best_hm']
         print('New best HM ', best_hm)
-        #save_checkpoint('best_hm')
+        save_checkpoint('best_hm')
 
     # Logs
     with open(ospj(logpath, 'logs.csv'), 'a') as f:
