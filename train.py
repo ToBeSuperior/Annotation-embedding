@@ -109,12 +109,11 @@ def main():
                 model.update_adj(epoch + 1.)
 
         if epoch % args.eval_val_every == 0 and epoch>0:
-            if epoch % args.eval_val_every == 0:
-                with torch.no_grad():  # todo: might not be needed
-                    if args.fast_eval:
-                        test_fast(epoch, image_extractor, model, testloader, evaluator_val, writer, args, logpath)
-                    else:
-                        test(epoch, image_extractor, model, testloader, evaluator_val, writer, args, logpath)
+            with torch.no_grad():  # todo: might not be needed
+                if args.fast_eval:
+                    test_fast(epoch, image_extractor, model, testloader, evaluator_val, writer, args, logpath)
+                else:
+                    test(epoch, image_extractor, model, testloader, evaluator_val, writer, args, logpath)
     print('Best AUC achieved is ', best_auc)
     print('Best HM achieved is ', best_hm)
 
@@ -209,8 +208,8 @@ def test(epoch, image_extractor, model, testloader, evaluator, writer, args, log
     result = result + args.name
     print(f'Test Epoch: {epoch}')
     print(result)
-    #if epoch > 0 and epoch % args.save_every == 0:
-    #    save_checkpoint(epoch)
+    if epoch > 0 and epoch % args.save_every == 0:
+       save_checkpoint(epoch)
     if stats['AUC'] > best_auc:
         best_auc = stats['AUC']
         print('New best AUC ', best_auc)
@@ -220,13 +219,6 @@ def test(epoch, image_extractor, model, testloader, evaluator, writer, args, log
         best_hm = stats['best_hm']
         print('New best HM ', best_hm)
         #save_checkpoint('best_hm')
-
-    # Logs
-    with open(ospj(logpath, 'logs.csv'), 'a') as f:
-        w = csv.DictWriter(f, stats.keys())
-        if epoch == 0:
-            w.writeheader()
-        w.writerow(stats)
 
     # Logs
     with open(ospj(logpath, 'logs.csv'), 'a') as f:
